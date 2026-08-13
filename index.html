@@ -130,11 +130,11 @@ const POSE = {
     sh:[-4,-86], head:[0,-107],
     elb:[-17,-98], hand:[-25,-106], elbB:[13,-96], handB:[19,-102]
   }),
-  // ★成功ポーズ：膝を90度に曲げて静止（すね垂直・ももは水平）
-  land90: P({
-    hip:[-25,-27], knee:[0,-25], foot:[0,0], kneeB:[-13,-25], footB:[-13,0],
-    sh:[-18,-62], head:[-11,-83],
-    elb:[-4,-65], hand:[12,-57], elbB:[-9,-61], handB:[7,-52]
+  // ★成功ポーズ：膝立ち（膝を90度に後ろへ折り、すねを座布団につけて上体は垂直）
+  kneel: P({
+    hip:[0,-27], knee:[1,-6], foot:[-27,-5], kneeB:[-5,-6], footB:[-31,-6],
+    sh:[0,-62], head:[3,-83],
+    elb:[10,-46], hand:[13,-28], elbB:[-10,-46], handB:[-13,-28]
   }),
   lying: P({   // 仰向けに倒れる
     hip:[-16,-12], knee:[6,-16], foot:[24,-8], kneeB:[4,-9], footB:[23,-4],
@@ -183,7 +183,7 @@ const STYLES = {
   student:{ skin:'#f6d3ae', shirt:'#f4f7fb', shirt2:'#d9e2ee', pants:'#33507e',
             shoe:'#e8e8ea', hair:'#241a15', kind:'student' },
   // メガネのオタク
-  otaku:{ skin:'#efd9c4', shirt:'#7f5a6d', shirt2:'#5c3d4d', pants:'#4a4a52',
+  otaku:{ skin:'#efd9c4', shirt:'#4a6ea8', shirt2:'#2f4a75', pants:'#4a4a52',
           shoe:'#3b3b42', hair:'#1b1414', kind:'otaku' },
   // オタクの仲間
   friend:{ skin:'#f3cba4', shirt:'#5fa87c', shirt2:'#3f7d59', pants:'#5a4a3a',
@@ -216,9 +216,12 @@ function limb(a,b,c,color,w,sleeve,back){
     ctx.strokeStyle='rgba(0,0,0,.26)'; ctx.lineWidth=w+(sleeve?4:0); ctx.stroke();
   }
 }
-function shoe(f,color,dir,back){
+function shoe(f,color,dir,back,flat){
   ctx.fillStyle=color; ctx.strokeStyle=INK; ctx.lineWidth=2;
-  ctx.beginPath(); ctx.ellipse(f[0]+3*dir,f[1]-4,9.5,5.5,0,0,7); ctx.fill(); ctx.stroke();
+  ctx.beginPath();
+  if(flat) ctx.ellipse(f[0]+7*dir, f[1]+1, 10, 4.6, 0,0,7);   // 膝立ちで甲を床につけた足
+  else     ctx.ellipse(f[0]+3*dir, f[1]-4, 9.5, 5.5, 0,0,7);
+  ctx.fill(); ctx.stroke();
   if(back){ ctx.fillStyle='rgba(0,0,0,.26)'; ctx.fill(); }
 }
 function drawFace(p,C,mood,blink){
@@ -331,7 +334,12 @@ function drawPerson(pose, C, o={}){
     ctx.fillStyle='#2c3746'; ctx.beginPath(); ctx.roundRect(-10,-2,17,10,4); ctx.fill();
     ctx.restore();
   }
-  limb(p.hip,p.kneeB,p.footB,C.pants,9,null,true);  shoe(p.footB,C.shoe,1,true);
+  // すねが水平に近いポーズ（膝立ち等）では、足も寝かせてすねの向きに合わせる
+  const flatF = Math.abs(p.foot[0]-p.knee[0])  > Math.abs(p.foot[1]-p.knee[1]);
+  const flatB = Math.abs(p.footB[0]-p.kneeB[0])> Math.abs(p.footB[1]-p.kneeB[1]);
+  const dirF  = flatF ? Math.sign(p.foot[0]-p.knee[0])  || 1 : 1;
+  const dirB  = flatB ? Math.sign(p.footB[0]-p.kneeB[0])|| 1 : 1;
+  limb(p.hip,p.kneeB,p.footB,C.pants,9,null,true);  shoe(p.footB,C.shoe,dirB,true,flatB);
   limb(p.sh,p.elbB,p.handB,C.skin,7,C.shirt2,true);
   // 胴
   capsule(p.hip[0],p.hip[1],p.sh[0],p.sh[1],12);
@@ -362,7 +370,7 @@ function drawPerson(pose, C, o={}){
   ctx.fillStyle=C.shirt2;
   ctx.beginPath(); ctx.moveTo(p.sh[0]-7,p.sh[1]-4); ctx.lineTo(p.sh[0]+7,p.sh[1]-4);
   ctx.lineTo(p.sh[0]+1,p.sh[1]+5); ctx.closePath(); ctx.fill();
-  limb(p.hip,p.knee,p.foot,C.pants,9);         shoe(p.foot,C.shoe,1);
+  limb(p.hip,p.knee,p.foot,C.pants,9);         shoe(p.foot,C.shoe,dirF,false,flatF);
   limb(p.sh,p.elb,p.hand,C.skin,7,C.shirt2);
   drawFace(p,C,mood,blink);
   ctx.restore();
@@ -539,13 +547,14 @@ function doJump(){
   if(G.otaku) setTimeout(()=>snd(900,.5,'sine',.06,-700), 60);
 }
 function judge(){
-  const err = Math.abs(zabutonX() - CENTER);
+  const zx  = zabutonX();                 // 揺れを止める前に位置を確定させる
+  const err = Math.abs(zx - CENTER);
   G.jump.err = err;
-  G.sway = false; G.zxFrozen = zabutonX();
+  G.zxFrozen = zx; G.sway = false;
   if(err <= 30){                       // ★成功
     G.state='success'; G.t=0; SE.land(); SE.good();
     G.hero.mood='happy'; fx(CENTER, stackTopY(G.count)-4, 'star');
-    msg('ナイス着地！','ぴたっと膝90度', 1.0);
+    msg('ナイス着地！','ぴたっと膝立ち', 1.0);
     G.shake = 5;
   }else if(G.otaku){                   // オタク失敗 → 激昂して追いかけ回す
     G.state='rage'; G.t=0; SE.angry();
@@ -676,7 +685,7 @@ function update(dt){
   }
   case 'success': {
     h.x = CENTER; h.y = stackTopY(G.count);
-    h.pose = poseLerp(POSE.airDown, POSE.land90, Math.min(1, G.t/.16));
+    h.pose = poseLerp(POSE.airDown, POSE.kneel, Math.min(1, G.t/.22));
     h.mood = 'happy';
     if(G.t>1.15){                       // 座布団が1枚増える
       G.count++; G.state='grow'; G.t=0;
