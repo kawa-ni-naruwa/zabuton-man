@@ -1,0 +1,974 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>座布団マン</title>
+<style>
+  :root{
+    --bg:#1d1512;
+    --panel:#2a1f19;
+    --gold:#e8c56a;
+    --cream:#f6ecd8;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--cream);
+    font-family:"Hiragino Sans","Hiragino Kaku Gothic ProN","Yu Gothic",system-ui,sans-serif;
+    overscroll-behavior:none;touch-action:manipulation}
+  .wrap{max-width:820px;margin:0 auto;padding:8px 10px 18px;
+    display:flex;flex-direction:column;min-height:100dvh}
+  header{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:2px 2px 8px}
+  h1{margin:0;font-size:20px;letter-spacing:.22em;color:var(--gold);
+     text-shadow:0 2px 0 #00000066}
+  h1 small{display:block;font-size:10px;letter-spacing:.12em;color:#b09a7a;margin-top:2px}
+  .sound{background:#3a2b21;border:1px solid #55402f;color:var(--cream);
+    border-radius:999px;padding:6px 12px;font-size:12px;cursor:pointer}
+  .stage{position:relative;border-radius:14px;overflow:hidden;
+    border:3px solid #4a382a;box-shadow:0 10px 30px #0009,inset 0 0 0 1px #00000055;background:#000}
+  canvas{display:block;width:100%;height:auto}
+  #btn{margin-top:14px;width:100%;padding:20px 10px;font-size:24px;font-weight:800;
+    letter-spacing:.2em;color:#3a2410;cursor:pointer;
+    background:linear-gradient(#ffd97a,#e5a93c);
+    border:none;border-bottom:6px solid #a8721f;border-radius:16px;
+    box-shadow:0 6px 18px #0007;transition:transform .05s,border-width .05s}
+  #btn:active{transform:translateY(4px);border-bottom-width:2px}
+  #btn.attack{background:linear-gradient(#ff9a8a,#e1442c);color:#fff;border-bottom-color:#8e2413}
+  .hint{margin:8px 0 0;text-align:center;font-size:11px;color:#8d7862;letter-spacing:.06em}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>座布団マン<small>ZABUTON MAN</small></h1>
+    <button class="sound" id="sound">♪ 音 ON</button>
+  </header>
+  <div class="stage"><canvas id="cv"></canvas></div>
+  <button id="btn">スタート</button>
+  <p class="hint">スペースキー / 画面タップでも操作できます</p>
+</div>
+
+<script>
+"use strict";
+/* ============================================================
+   座布団マン  —  旅館の大広間で座布団の山に飛び乗るゲーム
+   ============================================================ */
+
+const cv  = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+const btn = document.getElementById('btn');
+
+const W = 800, H = 520;          // 論理解像度
+const GROUND = 432;              // 畳の立ち位置（足元のY）
+const CENTER = 400;              // 着地点X（ここは動かない。座布団の方が揺れる）
+const STARTX = 668;              // 男が立っている位置（右側）
+const ZW = 98;                   // 座布団の幅
+
+let scale = 1;
+function resize(){
+  const cssW = cv.parentElement.getBoundingClientRect().width;
+  const dpr  = Math.min(window.devicePixelRatio || 1, 2);
+  cv.width  = Math.round(cssW * dpr);
+  cv.height = Math.round(cssW * H / W * dpr);
+  scale = cssW / W * dpr;
+}
+window.addEventListener('resize', resize);
+
+/* ---------- 音（WebAudioの簡易シンセ） ---------- */
+let actx = null, soundOn = true;
+function snd(freq, dur, type='square', vol=.12, slide=0){
+  if(!soundOn) return;
+  try{
+    actx = actx || new (window.AudioContext||window.webkitAudioContext)();
+    const o = actx.createOscillator(), g = actx.createGain();
+    o.type = type; o.frequency.setValueAtTime(freq, actx.currentTime);
+    if(slide) o.frequency.exponentialRampToValueAtTime(Math.max(40,freq+slide), actx.currentTime+dur);
+    g.gain.setValueAtTime(vol, actx.currentTime);
+    g.gain.exponentialRampToValueAtTime(.0001, actx.currentTime+dur);
+    o.connect(g); g.connect(actx.destination);
+    o.start(); o.stop(actx.currentTime+dur);
+  }catch(e){}
+}
+const SE = {
+  jump:  ()=>snd(320,.18,'square',.10,260),
+  land:  ()=>{snd(180,.16,'sine',.20,-90); snd(90,.22,'triangle',.16,-40);},
+  good:  ()=>{snd(660,.09,'square',.10); setTimeout(()=>snd(880,.14,'square',.10),90);},
+  fail:  ()=>{snd(200,.4,'sawtooth',.10,-150);},
+  angry: ()=>{snd(120,.5,'sawtooth',.12,60);},
+  hit:   ()=>{snd(90,.25,'square',.20,-60); snd(500,.08,'sawtooth',.10,-400);},
+  whack: ()=>snd(150,.07,'triangle',.08,-70),
+  fanfare:()=>{[523,659,784,1046].forEach((f,i)=>setTimeout(()=>snd(f,.18,'square',.10),i*90));}
+};
+document.getElementById('sound').onclick = (e)=>{
+  soundOn = !soundOn;
+  e.target.textContent = soundOn ? '♪ 音 ON' : '♪ 音 OFF';
+};
+
+/* ============================================================
+   ポーズ定義（右向きローカル座標／足元が原点、上が負）
+   ============================================================ */
+const BASE = {
+  hip:[0,-46], knee:[2,-24], foot:[0,0], kneeB:[-4,-24], footB:[-10,0],
+  sh:[0,-80], head:[3,-101],
+  elb:[10,-64], hand:[14,-46], elbB:[-10,-64], handB:[-14,-46]
+};
+const P = o => Object.assign({}, BASE, o);
+
+const POSE = {
+  stand: P({}),
+  crouch: P({
+    hip:[-5,-33], knee:[8,-20], foot:[0,0], kneeB:[0,-20], footB:[-12,0],
+    sh:[-8,-66], head:[-4,-87],
+    elb:[-17,-57], hand:[-27,-52], elbB:[-19,-55], handB:[-29,-50]
+  }),
+  airUp: P({
+    hip:[0,-54], knee:[13,-36], foot:[9,-16], kneeB:[1,-34], footB:[-13,-22],
+    sh:[-2,-88], head:[2,-109],
+    elb:[11,-108], hand:[15,-124], elbB:[-12,-106], handB:[-18,-120]
+  }),
+  airDown: P({
+    hip:[0,-52], knee:[11,-30], foot:[15,-7], kneeB:[-2,-30], footB:[-11,-9],
+    sh:[-4,-86], head:[0,-107],
+    elb:[-17,-98], hand:[-25,-106], elbB:[13,-96], handB:[19,-102]
+  }),
+  // ★成功ポーズ：膝を90度に曲げて静止（すね垂直・ももは水平）
+  land90: P({
+    hip:[-25,-27], knee:[0,-25], foot:[0,0], kneeB:[-13,-25], footB:[-13,0],
+    sh:[-18,-62], head:[-11,-83],
+    elb:[-4,-65], hand:[12,-57], elbB:[-9,-61], handB:[7,-52]
+  }),
+  lying: P({   // 仰向けに倒れる
+    hip:[-16,-12], knee:[6,-16], foot:[24,-8], kneeB:[4,-9], footB:[23,-4],
+    sh:[-44,-15], head:[-62,-19],
+    elb:[-54,-31], hand:[-58,-46], elbB:[-52,-4], handB:[-64,3]
+  }),
+  flinch: P({  // 座布団で叩かれてすくむ
+    hip:[0,-42], knee:[4,-22], foot:[1,0], kneeB:[-6,-22], footB:[-11,0],
+    sh:[3,-73], head:[9,-91],
+    elb:[14,-80], hand:[9,-95], elbB:[-2,-80], handB:[-6,-96]
+  }),
+  swingUp: P({  // 座布団を振りかぶる
+    hip:[0,-46], knee:[6,-24], foot:[8,0], kneeB:[-6,-24], footB:[-12,0],
+    sh:[-2,-80], head:[-1,-101],
+    elb:[10,-100], hand:[3,-118], elbB:[5,-102], handB:[-2,-120]
+  }),
+  swingDown: P({ // 振り下ろす
+    hip:[-2,-44], knee:[6,-23], foot:[8,0], kneeB:[-6,-23], footB:[-12,0],
+    sh:[4,-76], head:[14,-94],
+    elb:[20,-74], hand:[31,-60], elbB:[17,-76], handB:[28,-64]
+  })
+};
+function poseLerp(a,b,t){
+  const o = {};
+  for(const k in BASE) o[k] = [a[k][0]+(b[k][0]-a[k][0])*t, a[k][1]+(b[k][1]-a[k][1])*t];
+  return o;
+}
+function runPose(ph){
+  const s = Math.sin(ph), s2 = Math.sin(ph+Math.PI);
+  const lift = v => -Math.max(0, v)*7;
+  const b = Math.abs(s)*2;
+  return P({
+    hip:[0,-46+b], sh:[3,-80+b], head:[7,-101+b],
+    knee:[9*s+4,-25], foot:[19*s, lift(s)],
+    kneeB:[9*s2+2,-25], footB:[19*s2-2, lift(s2)],
+    elb:[10*s2+8,-66], hand:[17*s2+11,-50],
+    elbB:[10*s-8,-66], handB:[17*s-11,-50]
+  });
+}
+
+/* ============================================================
+   キャラクター描画
+   ============================================================ */
+const STYLES = {
+  // 大学生風の爽やかな男
+  student:{ skin:'#f6d3ae', shirt:'#f4f7fb', shirt2:'#d9e2ee', pants:'#33507e',
+            shoe:'#e8e8ea', hair:'#241a15', kind:'student' },
+  // メガネのオタク
+  otaku:{ skin:'#efd9c4', shirt:'#7f5a6d', shirt2:'#5c3d4d', pants:'#4a4a52',
+          shoe:'#3b3b42', hair:'#1b1414', kind:'otaku' },
+  // オタクの仲間
+  friend:{ skin:'#f3cba4', shirt:'#5fa87c', shirt2:'#3f7d59', pants:'#5a4a3a',
+           shoe:'#2f2f34', hair:'#2b2018', kind:'friend' }
+};
+
+const INK = '#2b1d15';                 // 輪郭線
+const PS  = 1.14;                      // キャラ全体の拡大率
+
+function capsule(x1,y1,x2,y2,r){
+  const a = Math.atan2(y2-y1, x2-x1);
+  ctx.beginPath();
+  ctx.arc(x1,y1,r, a+Math.PI/2, a-Math.PI/2);
+  ctx.arc(x2,y2,r, a-Math.PI/2, a+Math.PI/2);
+  ctx.closePath();
+}
+function limb(a,b,c,color,w,sleeve,back){
+  ctx.lineCap='round'; ctx.lineJoin='round';
+  ctx.beginPath(); ctx.moveTo(a[0],a[1]); ctx.lineTo(b[0],b[1]); ctx.lineTo(c[0],c[1]);
+  ctx.strokeStyle=INK; ctx.lineWidth=w+3.5; ctx.stroke();      // 輪郭
+  ctx.strokeStyle=color; ctx.lineWidth=w;   ctx.stroke();
+  if(sleeve){ // 袖
+    ctx.beginPath(); ctx.moveTo(a[0],a[1]);
+    ctx.lineTo(a[0]+(b[0]-a[0])*.55, a[1]+(b[1]-a[1])*.55);
+    ctx.strokeStyle=INK; ctx.lineWidth=w+7.5; ctx.stroke();
+    ctx.strokeStyle=sleeve; ctx.lineWidth=w+4; ctx.stroke();
+  }
+  if(back){ // 奥側は暗く
+    ctx.beginPath(); ctx.moveTo(a[0],a[1]); ctx.lineTo(b[0],b[1]); ctx.lineTo(c[0],c[1]);
+    ctx.strokeStyle='rgba(0,0,0,.26)'; ctx.lineWidth=w+(sleeve?4:0); ctx.stroke();
+  }
+}
+function shoe(f,color,dir,back){
+  ctx.fillStyle=color; ctx.strokeStyle=INK; ctx.lineWidth=2;
+  ctx.beginPath(); ctx.ellipse(f[0]+3*dir,f[1]-4,9.5,5.5,0,0,7); ctx.fill(); ctx.stroke();
+  if(back){ ctx.fillStyle='rgba(0,0,0,.26)'; ctx.fill(); }
+}
+function drawFace(p,C,mood,blink){
+  const [hx,hy] = p.head;
+  // 首
+  ctx.lineCap='round';
+  ctx.beginPath(); ctx.moveTo(p.sh[0],p.sh[1]); ctx.lineTo(hx,hy+9);
+  ctx.strokeStyle=INK; ctx.lineWidth=11.5; ctx.stroke();
+  ctx.strokeStyle=C.skin; ctx.lineWidth=8; ctx.stroke();
+  // 顔
+  ctx.fillStyle=C.skin; ctx.strokeStyle=INK; ctx.lineWidth=2.2;
+  ctx.beginPath(); ctx.ellipse(hx,hy,12.5,13.5,0,0,7); ctx.fill(); ctx.stroke();
+  // 髪（頭より一回り大きい形を上部だけ塗る）
+  ctx.save();
+  ctx.beginPath(); ctx.rect(hx-20,hy-24,40,16); ctx.clip();
+  ctx.fillStyle=C.hair;
+  ctx.beginPath(); ctx.ellipse(hx,hy-1,14,14.6,0,0,7); ctx.fill();
+  ctx.restore();
+  ctx.fillStyle=C.hair;
+  if(C.kind==='student'){                       // 前髪を斜めに流す
+    ctx.beginPath();
+    ctx.moveTo(hx-13,hy-6);
+    ctx.quadraticCurveTo(hx-13,hy-16,hx-1,hy-15);
+    ctx.quadraticCurveTo(hx+12,hy-14,hx+13,hy-3);
+    ctx.quadraticCurveTo(hx+4,hy-9,hx-4,hy-6);
+    ctx.quadraticCurveTo(hx-9,hy-4,hx-13,hy-6);
+    ctx.closePath(); ctx.fill();
+  }else if(C.kind==='otaku'){                   // ぼさぼさ＋アホ毛
+    ctx.beginPath(); ctx.moveTo(hx-14,hy-4);
+    for(let i=0;i<7;i++){
+      const ax = hx-14+ i*4.7;
+      ctx.lineTo(ax+2.3, hy-14-(i%2?5:0));
+      ctx.lineTo(ax+4.7, hy-3);
+    }
+    ctx.lineTo(hx+14,hy-8); ctx.closePath(); ctx.fill();
+    ctx.lineWidth=3; ctx.strokeStyle=C.hair;
+    ctx.beginPath(); ctx.moveTo(hx-2,hy-15);
+    ctx.quadraticCurveTo(hx+2,hy-27,hx+10,hy-24); ctx.stroke();
+  }else{                                        // ふわふわ
+    ctx.beginPath();
+    ctx.arc(hx-6,hy-12,6.5,0,7); ctx.arc(hx+3,hy-14,6,0,7); ctx.arc(hx+11,hy-9,5,0,7);
+    ctx.fill();
+  }
+  // 目
+  const ex1=hx+3, ex2=hx+10, ey=hy-1;
+  ctx.fillStyle='#1a1310'; ctx.strokeStyle='#1a1310'; ctx.lineWidth=2; ctx.lineCap='round';
+  if(mood==='dizzy'){
+    for(const ex of [ex1,ex2]){
+      ctx.beginPath(); ctx.moveTo(ex-3,ey-3); ctx.lineTo(ex+3,ey+3);
+      ctx.moveTo(ex+3,ey-3); ctx.lineTo(ex-3,ey+3); ctx.stroke();
+    }
+  }else if(mood==='happy'||blink){
+    for(const ex of [ex1,ex2]){
+      ctx.beginPath(); ctx.arc(ex,ey+1,3.4,Math.PI*1.1,Math.PI*1.9); ctx.stroke();
+    }
+  }else if(mood==='angry'){
+    for(const ex of [ex1,ex2]){
+      ctx.beginPath(); ctx.ellipse(ex,ey+1,2.4,3,0,0,7); ctx.fill();
+    }
+    ctx.lineWidth=2.4;
+    ctx.beginPath(); ctx.moveTo(ex1-3,ey-6); ctx.lineTo(ex1+3,ey-3);
+    ctx.moveTo(ex2-3,ey-3); ctx.lineTo(ex2+3,ey-6); ctx.stroke();
+  }else if(mood==='shock'){
+    for(const ex of [ex1,ex2]){
+      ctx.fillStyle='#fff'; ctx.beginPath(); ctx.ellipse(ex,ey,3.4,4,0,0,7); ctx.fill();
+      ctx.fillStyle='#1a1310'; ctx.beginPath(); ctx.ellipse(ex,ey,1.4,1.8,0,0,7); ctx.fill();
+    }
+  }else{
+    for(const ex of [ex1,ex2]){
+      ctx.beginPath(); ctx.ellipse(ex,ey,2.2,3,0,0,7); ctx.fill();
+    }
+  }
+  // 口
+  ctx.strokeStyle='#8a4a3a'; ctx.lineWidth=1.8;
+  ctx.beginPath();
+  if(mood==='happy'){ ctx.arc(hx+7,hy+5,4,0.15,Math.PI-0.15); }
+  else if(mood==='angry'||mood==='shock'){ ctx.ellipse(hx+7,hy+6,3.2,3.8,0,0,7); ctx.fillStyle='#7d2c2c'; ctx.fill(); }
+  else if(mood==='dizzy'){ ctx.moveTo(hx+3,hy+6); ctx.lineTo(hx+11,hy+6); }
+  else { ctx.arc(hx+7,hy+4,3.2,0.2,Math.PI-0.2); }
+  ctx.stroke();
+  // メガネ
+  if(C.kind==='otaku'){
+    ctx.strokeStyle='#2c2c33'; ctx.lineWidth=1.8;
+    ctx.beginPath();
+    ctx.rect(ex1-5,ey-4.5,9,9); ctx.rect(ex2-3.5,ey-4.5,9,9);
+    ctx.moveTo(ex1+4,ey); ctx.lineTo(ex2-3.5,ey);
+    ctx.moveTo(ex1-5,ey-1); ctx.lineTo(hx-11,ey-3);
+    ctx.stroke();
+    ctx.fillStyle='rgba(190,225,255,.30)';
+    ctx.fillRect(ex1-5,ey-4.5,9,9); ctx.fillRect(ex2-3.5,ey-4.5,9,9);
+  }
+  // 爽やかキラーン
+  if(C.kind==='student' && mood!=='dizzy'){
+    ctx.strokeStyle='rgba(255,255,255,.9)'; ctx.lineWidth=1.6;
+    ctx.beginPath(); ctx.moveTo(ex2+2,ey-4); ctx.lineTo(ex2+7,ey-9); ctx.stroke();
+  }
+}
+function drawPerson(pose, C, o={}){
+  const {x, y, facing=1, mood='normal', alpha=1, rot=0, blink=false} = o;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.translate(x,y); if(rot) ctx.rotate(rot); ctx.scale(facing*PS, PS);
+  const p = pose;
+  // リュック（オタク）
+  if(C.kind==='otaku'){
+    const bx=(p.hip[0]+p.sh[0])/2-12, by=(p.hip[1]+p.sh[1])/2;
+    ctx.save(); ctx.translate(bx,by); ctx.rotate(-.08);
+    ctx.fillStyle='#3d4a5c'; ctx.strokeStyle=INK; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.roundRect(-12,-15,21,31,7); ctx.fill(); ctx.stroke();
+    ctx.fillStyle='#2c3746'; ctx.beginPath(); ctx.roundRect(-10,-2,17,10,4); ctx.fill();
+    ctx.restore();
+  }
+  limb(p.hip,p.kneeB,p.footB,C.pants,9,null,true);  shoe(p.footB,C.shoe,1,true);
+  limb(p.sh,p.elbB,p.handB,C.skin,7,C.shirt2,true);
+  // 胴
+  capsule(p.hip[0],p.hip[1],p.sh[0],p.sh[1],12);
+  ctx.fillStyle=C.shirt; ctx.fill();
+  ctx.strokeStyle=INK; ctx.lineWidth=2.4; ctx.stroke();
+  ctx.save(); ctx.clip();
+  if(C.kind==='otaku'){ // チェック柄
+    ctx.strokeStyle='rgba(0,0,0,.30)'; ctx.lineWidth=2.4;
+    const dx = p.sh[0]-p.hip[0], dy = p.sh[1]-p.hip[1];
+    const L = Math.hypot(dx,dy)||1, nx = -dy/L, ny = dx/L;
+    for(let i=-12;i<=12;i+=6){
+      ctx.beginPath();
+      ctx.moveTo(p.hip[0]+nx*i, p.hip[1]+ny*i);
+      ctx.lineTo(p.sh[0]+nx*i,  p.sh[1]+ny*i); ctx.stroke();
+    }
+    for(let t=0;t<=1.01;t+=.16){
+      const cx=p.hip[0]+dx*t, cy=p.hip[1]+dy*t;
+      ctx.beginPath(); ctx.moveTo(cx-nx*13,cy-ny*13); ctx.lineTo(cx+nx*13,cy+ny*13); ctx.stroke();
+    }
+  }else{
+    ctx.strokeStyle='rgba(0,0,0,.16)'; ctx.lineWidth=1.6;
+    ctx.beginPath(); ctx.moveTo(p.sh[0]+1,p.sh[1]+2); ctx.lineTo(p.hip[0]+1,p.hip[1]-2); ctx.stroke();
+    ctx.fillStyle=C.pants; // ズボンの腰
+    ctx.beginPath(); ctx.arc(p.hip[0],p.hip[1]+4,11.5,0,7); ctx.fill();
+  }
+  ctx.restore();
+  // 襟
+  ctx.fillStyle=C.shirt2;
+  ctx.beginPath(); ctx.moveTo(p.sh[0]-7,p.sh[1]-4); ctx.lineTo(p.sh[0]+7,p.sh[1]-4);
+  ctx.lineTo(p.sh[0]+1,p.sh[1]+5); ctx.closePath(); ctx.fill();
+  limb(p.hip,p.knee,p.foot,C.pants,9);         shoe(p.foot,C.shoe,1);
+  limb(p.sh,p.elb,p.hand,C.skin,7,C.shirt2);
+  drawFace(p,C,mood,blink);
+  ctx.restore();
+}
+
+/* ============================================================
+   座布団
+   ============================================================ */
+const ZCOL = [
+  ['#a8354a','#7d2437'], ['#6b4c8f','#4c3468'], ['#2f5b86','#22415f'],
+  ['#a86a2c','#7d4c1c'], ['#4b7a4a','#355936'], ['#8f3f6f','#6a2c52']
+];
+function drawZabuton(cx, cy, w, h, ci, rot=0, top=false){
+  const [c1,c2] = ZCOL[ci % ZCOL.length];
+  ctx.save(); ctx.translate(cx,cy); ctx.rotate(rot);
+  const hw=w/2, hh=h/2;
+  ctx.beginPath();
+  ctx.moveTo(-hw+6,-hh);
+  ctx.lineTo(hw-6,-hh);
+  ctx.quadraticCurveTo(hw+3,-hh, hw+3,-hh+5);
+  ctx.quadraticCurveTo(hw+5,0, hw+3,hh-5);
+  ctx.quadraticCurveTo(hw+3,hh, hw-6,hh);
+  ctx.lineTo(-hw+6,hh);
+  ctx.quadraticCurveTo(-hw-3,hh, -hw-3,hh-5);
+  ctx.quadraticCurveTo(-hw-5,0, -hw-3,-hh+5);
+  ctx.quadraticCurveTo(-hw-3,-hh, -hw+6,-hh);
+  ctx.closePath();
+  const g = ctx.createLinearGradient(0,-hh,0,hh);
+  g.addColorStop(0,c1); g.addColorStop(1,c2);
+  ctx.fillStyle=g; ctx.fill();
+  ctx.strokeStyle='rgba(30,14,10,.75)'; ctx.lineWidth=2; ctx.stroke();
+  ctx.strokeStyle='rgba(0,0,0,.22)'; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(-hw+2,hh*.3); ctx.lineTo(hw-2,hh*.3); ctx.stroke();
+  if(top){ // 上面と中央の房
+    ctx.fillStyle='rgba(255,255,255,.16)';
+    ctx.beginPath(); ctx.ellipse(0,-hh+3,hw-5,5,0,0,7); ctx.fill();
+    ctx.fillStyle='#f2e5c4'; ctx.strokeStyle='rgba(60,30,20,.6)'; ctx.lineWidth=1.2;
+    ctx.beginPath(); ctx.arc(0,-hh+3,3.6,0,7); ctx.fill(); ctx.stroke();
+  }
+  ctx.restore();
+}
+const ZH = 22;                                            // 座布団の厚み
+function stackLayerH(n){ return Math.min(17, 170/Math.max(1,n)); }
+function stackTopY(n){ return GROUND - (n-1)*stackLayerH(n) - ZH + 5; }
+function zabutonCY(i,lh){ return GROUND - i*lh - ZH/2; }
+
+/* ============================================================
+   背景：旅館の大広間
+   ============================================================ */
+function drawRoom(){
+  // 天井
+  const cg = ctx.createLinearGradient(0,0,0,96);
+  cg.addColorStop(0,'#2b1c14'); cg.addColorStop(1,'#4b3423');
+  ctx.fillStyle=cg; ctx.fillRect(0,0,W,96);
+  ctx.fillStyle='#3a2618';
+  for(let x=-40;x<W+80;x+=110){
+    ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x+34,0); ctx.lineTo(x+66,92); ctx.lineTo(x+22,92); ctx.closePath(); ctx.fill();
+  }
+  ctx.fillStyle='#5a3f2a'; ctx.fillRect(0,86,W,14);
+  ctx.fillStyle='#6d4e34'; ctx.fillRect(0,86,W,4);
+  // 提灯
+  for(const lx of [96,704]){
+    ctx.strokeStyle='#2a1a10'; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.moveTo(lx,0); ctx.lineTo(lx,26); ctx.stroke();
+    ctx.fillStyle='#e8d7a8';
+    ctx.beginPath(); ctx.ellipse(lx,48,17,22,0,0,7); ctx.fill();
+    ctx.strokeStyle='rgba(120,80,40,.5)'; ctx.lineWidth=1;
+    for(let i=-2;i<=2;i++){ ctx.beginPath(); ctx.ellipse(lx,48+i*8,17*Math.cos(i*.32),2,0,0,7); ctx.stroke(); }
+    ctx.fillStyle='#a83030'; ctx.font='bold 15px "Hiragino Sans",sans-serif';
+    ctx.textAlign='center'; ctx.fillText('宴',lx,54);
+  }
+  // 壁
+  ctx.fillStyle='#c9b391'; ctx.fillRect(0,100,W,236);
+  // 障子
+  for(let i=0;i<5;i++){
+    const x = 118 + i*114;
+    if(i===2) continue;              // 中央は床の間
+    ctx.fillStyle='#f3ead4'; ctx.fillRect(x,112,104,206);
+    ctx.strokeStyle='#8a6a48'; ctx.lineWidth=3; ctx.strokeRect(x,112,104,206);
+    ctx.lineWidth=1.6; ctx.strokeStyle='#a98a63';
+    for(let c=1;c<4;c++){ ctx.beginPath(); ctx.moveTo(x+c*26,112); ctx.lineTo(x+c*26,318); ctx.stroke(); }
+    for(let r=1;r<7;r++){ ctx.beginPath(); ctx.moveTo(x,112+r*29); ctx.lineTo(x+104,112+r*29); ctx.stroke(); }
+  }
+  // 床の間＋掛け軸＋活け花
+  ctx.fillStyle='#a8886a'; ctx.fillRect(340,106,124,222);
+  ctx.fillStyle='#6f5238'; ctx.fillRect(340,106,124,10);
+  ctx.fillStyle='#e9dfc6'; ctx.fillRect(368,124,68,150);
+  ctx.fillStyle='#5b432c'; ctx.fillRect(364,120,76,8); ctx.fillRect(364,270,76,8);
+  ctx.fillStyle='#2b211a'; ctx.font='bold 34px "Hiragino Mincho ProN",serif'; ctx.textAlign='center';
+  ctx.fillText('座',402,172); ctx.fillText('布',402,210); ctx.fillText('団',402,248);
+  ctx.fillStyle='#8a3030'; ctx.font='9px "Hiragino Mincho ProN",serif';
+  ctx.fillText('魂',430,262);
+  // 花瓶
+  ctx.fillStyle='#3d4f5c';
+  ctx.beginPath(); ctx.ellipse(452,312,11,16,0,0,7); ctx.fill();
+  ctx.strokeStyle='#4b6b3c'; ctx.lineWidth=2;
+  ctx.beginPath(); ctx.moveTo(452,300); ctx.quadraticCurveTo(444,282,436,276); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(452,300); ctx.quadraticCurveTo(462,284,470,282); ctx.stroke();
+  ctx.fillStyle='#d97a94';
+  ctx.beginPath(); ctx.arc(435,274,5,0,7); ctx.fill();
+  ctx.beginPath(); ctx.arc(471,281,4,0,7); ctx.fill();
+  // 畳
+  const tg = ctx.createLinearGradient(0,330,0,H);
+  tg.addColorStop(0,'#93a06a'); tg.addColorStop(.45,'#a8b378'); tg.addColorStop(1,'#8f9c65');
+  ctx.fillStyle=tg; ctx.fillRect(0,330,W,H-330);
+  ctx.fillStyle='#7c8a58'; ctx.fillRect(0,330,W,5);
+  // 畳の目と縁
+  ctx.strokeStyle='rgba(60,70,40,.16)'; ctx.lineWidth=1;
+  for(let i=0;i<26;i++){
+    const y = 336 + i*7.4;
+    ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke();
+  }
+  const rows=[[336,372],[372,424],[424,H]];
+  ctx.fillStyle='#2f2a20';
+  rows.forEach((r,i)=>{
+    ctx.fillRect(0,r[1]-3,W,3);
+    const seg = [3,4,5][i];
+    for(let s=1;s<seg;s++){
+      const x = W*s/seg + (i%2? 40:-30);
+      ctx.fillRect(x,r[0],3,r[1]-r[0]);
+    }
+  });
+  ctx.fillStyle='rgba(0,0,0,.10)'; ctx.fillRect(0,330,W,16);
+}
+
+/* ============================================================
+   ゲーム状態
+   ============================================================ */
+const G = {
+  state:'title', t:0,
+  count:1, turn:1, best:+(localStorage.getItem('zabutonman-best')||0),
+  otaku:false, phase:0, sway:true,
+  hero:{x:STARTX, y:GROUND, pose:POSE.stand, facing:-1, mood:'normal', rot:0},
+  friend:{x:STARTX+64, y:GROUND, facing:-1, dir:-1, mood:'normal', alive:true},
+  jump:{dur:.85, apex:200, fromY:GROUND, toY:GROUND, hit:false, err:0},
+  chase:{t:0, limit:7, swing:0, cool:0, spd:196, fspd:212, retries:0},
+  parts:[], fx:[], shake:0, msg:null, msgT:0, blinkT:0, whackT:0, hitFlash:0
+};
+function setBtn(label, attack){
+  btn.textContent = label;
+  btn.classList.toggle('attack', !!attack);
+}
+function msg(text, sub, dur=1.4){ G.msg = {text, sub}; G.msgT = dur; }
+function fx(x,y,type,text){ G.fx.push({x,y,type,text,t:0,life:type==='star'?.9:1.2, vx:(Math.random()-.5)*40, vy:-50-Math.random()*40}); }
+
+function amp(){ return Math.min(52 + G.count*5, 132); }
+function spd(){ return Math.min(1.5 + G.count*.13, 4.2); }
+function zabutonX(){ return G.sway ? CENTER + amp()*Math.sin(G.phase) : G.zxFrozen; }
+
+function startTurn(){
+  G.otaku = (G.turn % 3 === 0);
+  G.hero.x = STARTX; G.hero.y = GROUND; G.hero.facing = -1; G.hero.rot = 0;
+  G.hero.pose = POSE.stand; G.hero.mood = G.otaku ? 'normal' : 'happy';
+  G.friend.x = STARTX + 64; G.friend.facing = -1; G.friend.alive = true; G.friend.mood='happy';
+  // 止まっていた山から揺れを再開するときは、位置が飛ばないように位相を合わせる
+  if(!G.sway && G.zxFrozen != null){
+    const r = Math.max(-1, Math.min(1, (G.zxFrozen - CENTER)/amp()));
+    G.phase = Math.random()<.5 ? Math.asin(r) : Math.PI - Math.asin(r);
+  }
+  G.sway = true; G.parts.length = 0;
+  G.state = 'ready'; G.t = 0;
+  setBtn('ジャンプ');
+}
+function doJump(){
+  G.hero.facing = -1;
+  const topY = stackTopY(G.count);
+  G.jump.fromY = GROUND; G.jump.toY = topY;
+  // 頂点の高さを画面内に収める（オタクは異常に高く跳ぶ）
+  const apexY = G.otaku ? Math.max(134, topY-250) : Math.max(134, topY-150);
+  G.jump.dur  = G.otaku ? 1.55 : .88;
+  G.jump.apex = (GROUND + topY)/2 - apexY;
+  G.state='jump'; G.t=0;
+  SE.jump();
+  if(G.otaku) setTimeout(()=>snd(900,.5,'sine',.06,-700), 60);
+}
+function judge(){
+  const err = Math.abs(zabutonX() - CENTER);
+  G.jump.err = err;
+  G.sway = false; G.zxFrozen = zabutonX();
+  if(err <= 30){                       // ★成功
+    G.state='success'; G.t=0; SE.land(); SE.good();
+    G.hero.mood='happy'; fx(CENTER, stackTopY(G.count)-4, 'star');
+    msg('ナイス着地！','ぴたっと膝90度', 1.0);
+    G.shake = 5;
+  }else if(G.otaku){                   // オタク失敗 → 激昂して追いかけ回す
+    G.state='rage'; G.t=0; SE.angry();
+    G.hero.mood='angry';
+    msg('外した！！','…オタク、激昂', 1.5);
+    G.shake = 10;
+  }else{                               // 通常失敗 → 座布団が飛び散る
+    scatter();
+  }
+}
+function scatter(){
+  G.state='fail'; G.t=0; SE.fail();
+  const zx = G.zxFrozen ?? CENTER, lh = stackLayerH(G.count);
+  for(let i=0;i<G.count;i++){
+    G.parts.push({
+      x: zx + (Math.random()-.5)*10, y: zabutonCY(i,lh),
+      vx:(Math.random()-.5)*520, vy:-260-Math.random()*330,
+      rot:(Math.random()-.5)*2, vr:(Math.random()-.5)*11, ci:i, bounced:false
+    });
+  }
+  G.hero.mood='dizzy'; G.shake = 16;
+  const isNew = G.count > G.best;
+  if(isNew){ G.best = G.count; localStorage.setItem('zabutonman-best', G.best); }
+  msg('記録 '+G.count+'枚', isNew ? '★自己ベスト更新！' : '自己ベスト '+G.best+'枚', 2.6);
+  setBtn('もう一度');
+}
+function startChase(){
+  G.state='chase'; G.t=0;
+  G.chase.t=0; G.chase.swing=0; G.chase.cool=0;
+  G.chase.spd = 208 + G.chase.retries*18;
+  G.chase.fspd = 236 + G.chase.retries*18;
+  G.hero.x = CENTER; G.hero.mood='angry';
+  G.friend.x = Math.min(G.friend.x, W-130); G.friend.dir = 1; G.friend.dash = 0;
+  G.friend.alive = true; G.friend.mood='shock';
+  setBtn('こうげき！', true);
+  msg('仲間を追え！','ボタンで座布団アタック', 1.6);
+}
+function chaseSwing(){
+  if(G.chase.cool>0 || !G.friend.alive) return;
+  G.chase.swing = .34; G.chase.cool = .5;
+  SE.whack();
+  setTimeout(()=>{
+    if(G.state!=='chase' || !G.friend.alive) return;
+    if(Math.abs(G.hero.x - G.friend.x) < 52){
+      G.friend.alive=false; G.friend.mood='dizzy';
+      G.friend.vx = (G.friend.x - G.hero.x >= 0 ? 1 : -1) * 300;
+      G.friend.vy = -320; G.friend.rot = 0; G.friend.vr = 9;
+      G.state='chaseHit'; G.t=0; G.shake=18; G.hitFlash=.25;
+      SE.hit(); fx(G.friend.x, GROUND-70,'pow','ドゴォ');
+      setTimeout(()=>SE.fanfare(), 500);
+    }
+  }, 120);
+}
+
+/* ---------- 入力 ---------- */
+function press(){
+  if(actx && actx.state==='suspended') actx.resume();
+  switch(G.state){
+    case 'title': G.count=1; G.turn=1; G.chase.retries=0; startTurn(); break;
+    case 'ready': doJump(); break;
+    case 'chase': chaseSwing(); break;
+    case 'fail':  if(G.t>1.0){ G.count=1; G.chase.retries=0; G.turn++; startTurn(); } break;
+  }
+}
+btn.addEventListener('click', press);
+cv.addEventListener('pointerdown', e=>{ e.preventDefault(); press(); });
+window.addEventListener('keydown', e=>{
+  if(e.code==='Space'||e.code==='Enter'){ e.preventDefault(); press(); }
+});
+
+/* ============================================================
+   更新
+   ============================================================ */
+function update(dt){
+  G.t += dt; G.blinkT += dt;
+  if(G.msgT>0) G.msgT -= dt;
+  if(G.shake>0) G.shake = Math.max(0, G.shake - dt*46);
+  if(G.hitFlash>0) G.hitFlash -= dt;
+  if(G.sway) G.phase += spd()*dt;
+
+  // エフェクト
+  for(const f of G.fx){ f.t+=dt; f.x+=f.vx*dt; f.y+=f.vy*dt; f.vy+=180*dt; }
+  G.fx = G.fx.filter(f=>f.t<f.life);
+  // 飛び散った座布団
+  for(const p of G.parts){
+    p.vy += 1250*dt; p.x += p.vx*dt; p.y += p.vy*dt; p.rot += p.vr*dt;
+    if(p.y > GROUND-6){
+      p.y = GROUND-6;
+      if(!p.bounced){ p.vy *= -.42; p.vx *= .6; p.vr *= .5; p.bounced=true; }
+      else { p.vy = 0; p.vx *= .86; p.vr *= .86; }
+    }
+  }
+
+  const h = G.hero;
+  switch(G.state){
+  case 'title':
+    h.pose = POSE.stand; h.x = STARTX; h.y = GROUND; break;
+
+  case 'ready': {
+    if(G.otaku){
+      // 仲間がずっと後ろから座布団で殴っている
+      G.whackT += dt;
+      const cyc = (G.whackT % .82) / .82;
+      const hitting = cyc > .42 && cyc < .62;
+      h.pose = hitting ? poseLerp(POSE.stand, POSE.flinch, Math.min(1,(cyc-.42)/.08))
+                       : poseLerp(POSE.flinch, POSE.stand, Math.min(1,(cyc<.42? cyc/.42 : (cyc-.62)/.38)));
+      h.mood = hitting ? 'shock' : 'angry';
+      G.friend.swing = cyc;
+      if(hitting && !G.friend.did){ G.friend.did=true; SE.whack(); fx(h.x-8, GROUND-124,'star'); }
+      if(!hitting) G.friend.did=false;
+    }else{
+      const bob = Math.sin(G.t*3)*.5+.5;
+      h.pose = poseLerp(POSE.stand, POSE.crouch, bob*.12);
+      h.mood = 'happy';
+    }
+    break;
+  }
+  case 'jump': {
+    const p = Math.min(1, G.t/G.jump.dur);
+    h.x = STARTX + (CENTER-STARTX)*p;
+    h.y = G.jump.fromY + (G.jump.toY-G.jump.fromY)*p - G.jump.apex*4*p*(1-p);
+    h.pose = p<.12 ? poseLerp(POSE.crouch, POSE.airUp, p/.12)
+           : p<.55 ? POSE.airUp
+           : poseLerp(POSE.airUp, POSE.airDown, Math.min(1,(p-.55)/.3));
+    h.mood = G.otaku ? 'shock' : 'normal';
+    if(p>=1) judge();
+    break;
+  }
+  case 'success': {
+    h.x = CENTER; h.y = stackTopY(G.count);
+    h.pose = poseLerp(POSE.airDown, POSE.land90, Math.min(1, G.t/.16));
+    h.mood = 'happy';
+    if(G.t>1.15){                       // 座布団が1枚増える
+      G.count++; G.state='grow'; G.t=0;
+      G.dropY = -60; G.dropV = 0;
+      // 揺れを再開。位相をずらして「即押し」が安定しないようにする
+      G.sway = true; G.phase += .7 + Math.random()*2.2;
+      SE.good();
+    }
+    break;
+  }
+  case 'grow': {
+    // 新しい座布団が落ちてくる／男は右へ戻る
+    G.dropV += 2400*dt; G.dropY += G.dropV*dt;
+    if(G.dropY >= 0){ G.dropY = 0; if(!G.dropped){ G.dropped=true; SE.land(); G.shake=6; } }
+    const p = Math.min(1, G.t/.55);
+    h.x = CENTER + (STARTX-CENTER)*p;
+    h.y = stackTopY(G.count-1) + (GROUND-stackTopY(G.count-1))*p - 90*4*p*(1-p);
+    h.pose = p<1 ? POSE.airUp : POSE.stand;
+    h.facing = 1;
+    if(p>=1){
+      G.dropped=false; G.turn++; G.chase.retries=0; startTurn();
+    }
+    break;
+  }
+  case 'rage': {
+    h.x = CENTER; h.y = GROUND;
+    h.pose = poseLerp(POSE.airDown, POSE.crouch, Math.min(1,G.t/.2));
+    h.mood='angry';
+    if(G.t>.9) startChase();
+    break;
+  }
+  case 'chase': {
+    G.chase.t += dt;
+    if(G.chase.cool>0) G.chase.cool -= dt;
+    if(G.chase.swing>0) G.chase.swing -= dt;
+    G.chase.spd += 11*dt;                       // だんだん詰められる
+    const f = G.friend;
+    // 逃げる仲間：基本は逃げ、壁際まで追い詰められたら横をすり抜ける
+    const away = Math.sign(f.x - h.x) || 1;
+    if(f.dash > 0){ f.dash -= dt; }
+    else if((f.x < 84 && away < 0) || (f.x > W-84 && away > 0)){ f.dir = -away; f.dash = .75; }
+    else f.dir = away;
+    f.x += f.dir * (f.dash>0 ? G.chase.fspd*1.45 : G.chase.fspd) * dt;
+    f.x = Math.max(56, Math.min(W-56, f.x));
+    f.facing = f.dir;
+    // 追うオタク
+    const d = f.x - h.x;
+    h.x += Math.sign(d) * Math.min(Math.abs(d), G.chase.spd*dt);
+    h.facing = Math.sign(d) || 1;
+    h.y = GROUND;
+    h.pose = runPose(G.chase.t*15);
+    h.mood = 'angry';
+    if(G.chase.t > G.chase.limit){ G.sway=false; G.zxFrozen=CENTER; scatter(); msg('逃げられた…','記録 '+G.count+'枚', 2.6); }
+    break;
+  }
+  case 'chaseHit': {
+    const f = G.friend;
+    f.vy += 1300*dt; f.x += f.vx*dt; f.y = (f.y||GROUND) + f.vy*dt; f.rot += f.vr*dt;
+    f.x = Math.max(70, Math.min(W-90, f.x));
+    if(f.y > GROUND-8){ f.y = GROUND; f.vy=0; f.vx=0; f.vr=0; f.rot=0; }
+    h.pose = poseLerp(POSE.swingDown, POSE.stand, Math.min(1,G.t/.5));
+    h.mood='angry'; h.y=GROUND;
+    if(G.t>.6 && G.msgT<=0 && !G.retryShown){
+      G.retryShown = true;
+      msg('再チャレンジ権獲得','同じ '+G.count+'枚 からやり直し', 2.2);
+    }
+    if(G.t>2.6){
+      G.retryShown=false; G.chase.retries++;
+      G.friend.y = GROUND; G.friend.rot = 0;
+      startTurn();                                  // ターン据え置き＝オタクのまま同じ枚数
+    }
+    break;
+  }
+  case 'fail': {
+    h.y = GROUND;
+    h.pose = poseLerp(POSE.airDown, POSE.lying, Math.min(1, G.t/.3));
+    h.mood = 'dizzy';
+    h.x = CENTER + Math.min(1,G.t/.3)*34;
+    break;
+  }}
+}
+
+/* ============================================================
+   描画
+   ============================================================ */
+function drawShadow(x, y, w, a=.22){
+  ctx.fillStyle='rgba(0,0,0,'+a+')';
+  ctx.beginPath(); ctx.ellipse(x,y,w,w*.28,0,0,7); ctx.fill();
+}
+function drawStack(){
+  if(G.state==='fail'){
+    for(const p of G.parts) drawZabuton(p.x,p.y,ZW*.92,ZH*1.35,p.ci,p.rot,true);
+    return;
+  }
+  // オタク失敗（激昂〜追跡）のときは飛び散らず、山はそのまま残る
+  const n  = G.state==='grow' ? G.count-1 : G.count;
+  const lh = stackLayerH(G.state==='grow' ? G.count : n);
+  const zx = zabutonX();
+  drawShadow(zx, GROUND+4, ZW*.52, .26);
+  for(let i=0;i<n;i++){
+    drawZabuton(zx, zabutonCY(i,lh), ZW, ZH, i, 0, i===n-1 && G.state!=='grow');
+  }
+  if(G.state==='grow'){
+    drawZabuton(zx, zabutonCY(G.count-1,lh) + (G.dropY||0), ZW, ZH, G.count-1, 0, true);
+  }
+}
+function drawFriend(){
+  const f = G.friend, C = STYLES.friend;
+  if(G.state==='ready' && G.otaku){
+    // 後ろから座布団で殴り続けている
+    const cyc = f.swing||0;
+    const p = cyc<.42 ? poseLerp(POSE.stand,POSE.swingUp,cyc/.42)
+            : cyc<.62 ? poseLerp(POSE.swingUp,POSE.swingDown,(cyc-.42)/.2)
+            : poseLerp(POSE.swingDown,POSE.stand,(cyc-.62)/.38);
+    drawShadow(f.x, GROUND+3, 20);
+    // 手に持った座布団
+    const hx = f.x - (p.hand[0]+p.handB[0])/2*PS, hy = GROUND + (p.hand[1]+p.handB[1])/2*PS;
+    drawPerson(p, C, {x:f.x, y:GROUND, facing:-1, mood:'happy'});
+    const ang = cyc<.42 ? 1.15 : (cyc<.62 ? 1.15-(cyc-.42)/.2*2.5 : -1.35+(cyc-.62)/.38*2.5);
+    drawZabuton(hx-8, hy-4, 58, 19, 0, ang, true);
+  }else if(G.otaku && (G.state==='jump'||G.state==='success'||G.state==='grow'||G.state==='rage')){
+    // オタクの番は仲間がずっと後ろにいる
+    drawShadow(f.x, GROUND+3, 20);
+    drawPerson(POSE.stand, C, {x:f.x, y:GROUND, facing:-1, mood:G.state==='rage'?'shock':'happy'});
+    drawZabuton(f.x+22, GROUND-52, 52, 18, 0, .35, true);
+  }else if(G.state==='chase'){
+    drawShadow(f.x, GROUND+3, 20);
+    drawPerson(runPose(G.chase.t*17+1), C, {x:f.x, y:GROUND, facing:f.facing, mood:'shock'});
+    if(Math.sin(G.chase.t*9)>0) fxText(f.x, GROUND-142, 'たすけて！', '#fff');
+  }else if(G.state==='chaseHit'){
+    const landed = (f.y||GROUND) >= GROUND-9;
+    drawShadow(f.x + (landed?26:0), GROUND+3, landed?30:20, .18);
+    drawPerson(landed?POSE.lying:POSE.airDown, C,
+      {x:f.x, y:landed?GROUND:(f.y||GROUND), facing:-1, mood:'dizzy', rot:landed?0:(f.rot||0)});
+    if(landed) for(let i=0;i<3;i++){   // 目を回す星
+      const a = G.t*5 + i*2.1;
+      star(f.x+70+Math.cos(a)*20, GROUND-42+Math.sin(a)*7, 6, '#ffe680');
+    }
+  }
+}
+function star(x,y,r,c){
+  ctx.fillStyle=c; ctx.beginPath();
+  for(let i=0;i<10;i++){
+    const a = -Math.PI/2 + i*Math.PI/5, rr = i%2? r*.45 : r;
+    ctx[i?'lineTo':'moveTo'](x+Math.cos(a)*rr, y+Math.sin(a)*rr);
+  }
+  ctx.closePath(); ctx.fill();
+}
+function fxText(x,y,t,c){
+  ctx.font='bold 15px "Hiragino Sans",sans-serif'; ctx.textAlign='center';
+  ctx.lineWidth=4; ctx.strokeStyle='rgba(0,0,0,.6)'; ctx.strokeText(t,x,y);
+  ctx.fillStyle=c; ctx.fillText(t,x,y);
+}
+function drawFx(){
+  for(const f of G.fx){
+    const a = 1 - f.t/f.life;
+    ctx.globalAlpha = a;
+    if(f.type==='star'){ for(let i=0;i<4;i++){ const an=f.t*8+i*1.6; star(f.x+Math.cos(an)*(14+f.t*40), f.y+Math.sin(an)*(10+f.t*30), 7-f.t*3, '#ffe680'); } }
+    else if(f.type==='pow'){
+      ctx.save(); ctx.translate(f.x,f.y); ctx.rotate(-.16); ctx.scale(1+f.t*.5,1+f.t*.5);
+      ctx.fillStyle='#ffd23f'; ctx.beginPath();
+      for(let i=0;i<16;i++){ const an=i*Math.PI/8, rr=i%2?26:46;
+        ctx[i?'lineTo':'moveTo'](Math.cos(an)*rr, Math.sin(an)*rr*.8); }
+      ctx.closePath(); ctx.fill();
+      ctx.fillStyle='#8e2413'; ctx.font='bold 22px "Hiragino Sans",sans-serif'; ctx.textAlign='center';
+      ctx.fillText(f.text||'', 0, 8); ctx.restore();
+    }
+    ctx.globalAlpha = 1;
+  }
+}
+function drawHUD(){
+  ctx.textAlign='left';
+  ctx.fillStyle='rgba(20,14,10,.55)';
+  ctx.beginPath(); ctx.roundRect(12,10,168,42,10); ctx.fill();
+  ctx.fillStyle='#f6ecd8'; ctx.font='bold 22px "Hiragino Sans",sans-serif';
+  ctx.fillText('座布団 '+G.count+' 枚', 24, 39);
+  ctx.textAlign='right';
+  ctx.fillStyle='rgba(20,14,10,.55)';
+  ctx.beginPath(); ctx.roundRect(W-176,10,164,42,10); ctx.fill();
+  ctx.fillStyle='#e8c56a'; ctx.font='bold 18px "Hiragino Sans",sans-serif';
+  ctx.fillText('自己ベスト '+G.best+' 枚', W-24, 37);
+  // 誰の番か
+  if(G.state==='ready'||G.state==='jump'){
+    ctx.textAlign='center';
+    ctx.fillStyle = G.otaku ? 'rgba(160,50,60,.85)' : 'rgba(30,70,120,.75)';
+    ctx.beginPath(); ctx.roundRect(W/2-96,60,192,28,14); ctx.fill();
+    ctx.fillStyle='#fff'; ctx.font='bold 15px "Hiragino Sans",sans-serif';
+    ctx.fillText(G.otaku ? 'メガネのオタク（3回に1回）' : '爽やか大学生', W/2, 80);
+  }
+  // 追跡タイマー
+  if(G.state==='chase'){
+    const p = 1 - G.chase.t/G.chase.limit;
+    ctx.fillStyle='rgba(0,0,0,.45)'; ctx.beginPath(); ctx.roundRect(W/2-140,62,280,16,8); ctx.fill();
+    ctx.fillStyle = p<.3? '#e1442c':'#ffd23f';
+    ctx.beginPath(); ctx.roundRect(W/2-138,64,276*Math.max(0,p),12,6); ctx.fill();
+  }
+}
+function drawMsg(){
+  if(G.msgT<=0 || !G.msg) return;
+  const a = Math.min(1, G.msgT*3);
+  ctx.globalAlpha = a; ctx.textAlign='center';
+  ctx.fillStyle='rgba(20,14,10,.78)';
+  ctx.beginPath(); ctx.roundRect(W/2-210,166,420,G.msg.sub?86:58,16); ctx.fill();
+  ctx.fillStyle='#ffd97a'; ctx.font='bold 34px "Hiragino Sans",sans-serif';
+  ctx.fillText(G.msg.text, W/2, 208);
+  if(G.msg.sub){
+    ctx.fillStyle='#f6ecd8'; ctx.font='16px "Hiragino Sans",sans-serif';
+    ctx.fillText(G.msg.sub, W/2, 236);
+  }
+  ctx.globalAlpha = 1;
+}
+function drawTitle(){
+  ctx.fillStyle='rgba(15,10,7,.62)'; ctx.fillRect(0,0,W,H);
+  ctx.textAlign='center';
+  ctx.fillStyle='#ffd97a'; ctx.font='bold 66px "Hiragino Sans",sans-serif';
+  ctx.fillText('座布団マン', W/2, 200);
+  ctx.fillStyle='#f6ecd8'; ctx.font='17px "Hiragino Sans",sans-serif';
+  ctx.fillText('揺れる座布団のど真ん中に、飛び乗れ。', W/2, 240);
+  ctx.font='14px "Hiragino Sans",sans-serif'; ctx.fillStyle='#c9b391';
+  ctx.fillText('成功すると座布団が1枚増える／3回に1回はメガネのオタクが登場', W/2, 274);
+  ctx.fillStyle = Math.sin(Date.now()/300)>0 ? '#ffd97a' : '#8d7862';
+  ctx.font='bold 20px "Hiragino Sans",sans-serif';
+  ctx.fillText('▼ ボタン / スペースで開始', W/2, 330);
+}
+
+function render(){
+  ctx.setTransform(scale,0,0,scale,0,0);
+  const sx = G.shake ? (Math.random()-.5)*G.shake : 0;
+  const sy = G.shake ? (Math.random()-.5)*G.shake : 0;
+  ctx.save(); ctx.translate(sx,sy);
+  ctx.clearRect(-20,-20,W+40,H+40);
+  drawRoom();
+
+  // 着地の目印
+  if(G.state==='ready'||G.state==='jump'){
+    ctx.strokeStyle='rgba(255,255,255,.13)'; ctx.setLineDash([6,8]); ctx.lineWidth=2;
+    ctx.beginPath(); ctx.moveTo(CENTER,120); ctx.lineTo(CENTER,GROUND); ctx.stroke();
+    ctx.setLineDash([]);
+    drawShadow(CENTER, GROUND+8, 26, .16);
+  }
+
+  drawStack();
+  drawFriend();
+
+  // 主人公
+  const h = G.hero, C = G.otaku ? STYLES.otaku : STYLES.student;
+  if(G.state!=='title' || true){
+    drawShadow(h.x, GROUND+3, 20, .2 - Math.min(.14,(GROUND-h.y)/1400));
+    const blink = (G.blinkT % 4) < .13;
+    let extraRot = 0;
+    if(G.state==='fail') extraRot = 0;
+    drawPerson(h.pose, C, {x:h.x, y:h.y, facing:h.facing, mood:h.mood, rot:extraRot, blink});
+    // オタクが持っている座布団（追跡中）
+    if(G.state==='chase'||G.state==='chaseHit'){
+      const sw = G.chase.swing>0 ? 1-G.chase.swing/.34 : 0;
+      const s2 = G.state==='chaseHit' ? 1 : sw;
+      drawZabuton(h.x + h.facing*(-16 + s2*48), GROUND-124 + s2*42,
+                  60, 19, 0, (-1.15 + s2*1.9)*h.facing, true);
+    }
+    // 怒りマーク
+    if(h.mood==='angry'){
+      const ax = h.x - h.facing*20, ay = h.y - 112;
+      ctx.strokeStyle='#e1442c'; ctx.lineWidth=3; ctx.lineCap='round';
+      for(let i=0;i<3;i++){
+        const a = i*2.1 + Math.sin(G.t*10)*.1;
+        ctx.beginPath();
+        ctx.moveTo(ax+Math.cos(a)*7, ay+Math.sin(a)*7);
+        ctx.lineTo(ax+Math.cos(a)*13, ay+Math.sin(a)*13);
+        ctx.moveTo(ax+Math.cos(a+.7)*7, ay+Math.sin(a+.7)*7);
+        ctx.lineTo(ax+Math.cos(a+.7)*13, ay+Math.sin(a+.7)*13);
+        ctx.stroke();
+      }
+    }
+  }
+  drawFx();
+  if(G.hitFlash>0){ ctx.fillStyle='rgba(255,255,255,'+(G.hitFlash*1.6)+')'; ctx.fillRect(0,0,W,H); }
+  drawHUD();
+  drawMsg();
+  if(G.state==='title') drawTitle();
+  ctx.restore();
+}
+
+/* ---------- ループ ---------- */
+let last = performance.now();
+function loop(now){
+  const dt = Math.min(.05, (now-last)/1000); last = now;
+  update(dt); render();
+  requestAnimationFrame(loop);
+}
+resize();
+setBtn('スタート');
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
