@@ -548,7 +548,7 @@ function setBtn(label, attack){
   btn.textContent = label;
   btn.classList.toggle('attack', !!attack);
 }
-function msg(text, sub, dur=1.4){ G.msg = {text, sub}; G.msgT = dur; }
+function msg(text, sub, dur=1.4, big){ G.msg = {text, sub, big}; G.msgT = dur; G.msgDur = dur; }
 function fx(x,y,type,text){ G.fx.push({x,y,type,text,t:0,life:type==='star'?.9:1.2, vx:(Math.random()-.5)*40, vy:-50-Math.random()*40}); }
 
 function amp(){ return Math.min(52 + G.count*5, 132); }
@@ -602,7 +602,7 @@ function judge(){
     G.zxFrozen = CENTER;
     G.state='success'; G.t=0; SE.land(); SE.fanfare();
     G.hero.mood='happy'; fx(CENTER, stackTopY(G.count)-4, 'star');
-    msg('ブリーフの奇跡！','座布団のほうが寄ってきた', 1.4);
+    msg('座布団マン', null, 1.6, true);
     G.shake = 8;
   }else if(err <= 30){                 // ★成功
     G.state='success'; G.t=0; SE.land(); SE.good();
@@ -942,17 +942,31 @@ function drawHUD(){
 }
 function drawMsg(){
   if(G.msgT<=0 || !G.msg) return;
-  const a = Math.min(1, G.msgT*3);
-  ctx.globalAlpha = a; ctx.textAlign='center';
+  const big = !!G.msg.big;
+  const bw = big?500:420, bh = big?104:(G.msg.sub?86:58), by = big?156:166;
+  const age = (G.msgDur||1.4) - G.msgT;
+  const pop = big ? 1 + Math.max(0, .42 - age*2.8) : 1;   // どんと出す
+  ctx.save();
+  ctx.globalAlpha = Math.min(1, G.msgT*3); ctx.textAlign='center';
+  ctx.translate(W/2, by+bh/2); ctx.scale(pop,pop); ctx.translate(-W/2, -(by+bh/2));
   ctx.fillStyle='rgba(20,14,10,.78)';
-  ctx.beginPath(); ctx.roundRect(W/2-210,166,420,G.msg.sub?86:58,16); ctx.fill();
-  ctx.fillStyle='#ffd97a'; ctx.font='bold 34px "Hiragino Sans",sans-serif';
-  ctx.fillText(G.msg.text, W/2, 208);
-  if(G.msg.sub){
-    ctx.fillStyle='#f6ecd8'; ctx.font='16px "Hiragino Sans",sans-serif';
-    ctx.fillText(G.msg.sub, W/2, 236);
+  ctx.beginPath(); ctx.roundRect(W/2-bw/2, by, bw, bh, 16); ctx.fill();
+  if(big){
+    ctx.font='bold 68px "Hiragino Sans",sans-serif';
+    ctx.lineJoin='round'; ctx.lineWidth=9; ctx.strokeStyle='#6f3510';
+    ctx.strokeText(G.msg.text, W/2, by+76);
+    const g = ctx.createLinearGradient(0, by+16, 0, by+88);
+    g.addColorStop(0,'#fff6cf'); g.addColorStop(.5,'#ffd160'); g.addColorStop(1,'#e2911d');
+    ctx.fillStyle=g; ctx.fillText(G.msg.text, W/2, by+76);
+  }else{
+    ctx.fillStyle='#ffd97a'; ctx.font='bold 34px "Hiragino Sans",sans-serif';
+    ctx.fillText(G.msg.text, W/2, 208);
+    if(G.msg.sub){
+      ctx.fillStyle='#f6ecd8'; ctx.font='16px "Hiragino Sans",sans-serif';
+      ctx.fillText(G.msg.sub, W/2, 236);
+    }
   }
-  ctx.globalAlpha = 1;
+  ctx.restore();
 }
 function drawTitle(){
   ctx.fillStyle='rgba(15,10,7,.62)'; ctx.fillRect(0,0,W,H);
