@@ -96,12 +96,41 @@ function resize(){
 window.addEventListener('resize', resize);
 window.addEventListener('orientationchange', ()=>setTimeout(resize,150));
 
-/* ---------- 音（WebAudioの簡易シンセ） ---------- */
-let actx = null, soundOn = true;
+/* ---------- 音（WebAudioの簡易シンセ） ----------
+   スマホ（特にiOS）は
+     ・ユーザー操作の中で AudioContext を作って resume しないと鳴らない
+     ・WebAudioは「着信/消音スイッチ」に従うので、マナーモードだと無音になる
+   の2点でハマる。前者は下の unlockAudio() を最初のタップで走らせて解決し、
+   後者は audioSession を playback にして回避する（Safari 16.4+）。      */
+let actx = null, soundOn = true, audioUnlocked = false, audioWarned = false;
+
+function unlockAudio(){
+  try{
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if(!AC) return;
+    if(!actx) actx = new AC();
+    // マナーモードでも鳴らす
+    try{ if(navigator.audioSession) navigator.audioSession.type = 'playback'; }catch(e){}
+    if(actx.state !== 'running' && actx.resume) actx.resume();
+    if(!audioUnlocked && actx.state === 'running'){
+      const b = actx.createBuffer(1,1,22050), s = actx.createBufferSource();
+      s.buffer = b; s.connect(actx.destination); s.start(0);   // 無音を1発鳴らして解錠
+      audioUnlocked = true;
+    }
+  }catch(e){}
+}
+// 最初のタップ／クリック／キーで解錠し、以後もアプリ復帰時に鳴る状態へ戻す
+['pointerdown','touchend','click','keydown'].forEach(ev =>
+  window.addEventListener(ev, unlockAudio, {passive:true, capture:true}));
+document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) unlockAudio(); });
+
 function snd(freq, dur, type='square', vol=.12, slide=0){
   if(!soundOn) return;
   try{
-    actx = actx || new (window.AudioContext||window.webkitAudioContext)();
+    if(!actx || actx.state !== 'running'){
+      unlockAudio();
+      if(!actx || actx.state !== 'running'){ noteAudioBlocked(); return; }
+    }
     const o = actx.createOscillator(), g = actx.createGain();
     o.type = type; o.frequency.setValueAtTime(freq, actx.currentTime);
     if(slide) o.frequency.exponentialRampToValueAtTime(Math.max(40,freq+slide), actx.currentTime+dur);
@@ -121,9 +150,21 @@ const SE = {
   whack: ()=>snd(150,.07,'triangle',.08,-70),
   fanfare:()=>{[523,659,784,1046].forEach((f,i)=>setTimeout(()=>snd(f,.18,'square',.10),i*90));}
 };
+// 端末側で塞がれているときだけ、一度だけ案内を出す
+function noteAudioBlocked(){
+  if(audioWarned || !soundOn) return;
+  // resume() は非同期なので、少し待っても鳴る状態にならないときだけ案内する
+  setTimeout(()=>{
+    if(audioWarned || !soundOn || (actx && actx.state === 'running')) return;
+    audioWarned = true;
+    const h = document.querySelector('.hint');
+    if(h) h.textContent = '音が出ないときは、端末のマナーモード（消音スイッチ）を解除してください';
+  }, 900);
+}
 document.getElementById('sound').onclick = (e)=>{
   soundOn = !soundOn;
-  e.target.textContent = soundOn ? '♪ 音 ON' : '♪ 音 OFF';
+  e.currentTarget.textContent = soundOn ? '♪ 音 ON' : '♪ 音 OFF';
+  if(soundOn){ unlockAudio(); snd(880,.08,'square',.10); }   // 押した瞬間に解錠＆確認音
 };
 
 /* ============================================================
@@ -736,7 +777,7 @@ function chaseSwing(){
 
 /* ---------- 入力 ---------- */
 function press(){
-  if(actx && actx.state==='suspended') actx.resume();
+  unlockAudio();
   switch(G.state){
     case 'title': G.count=1; G.turn=1; G.chase.retries=0; startTurn(); break;
     case 'ready': doJump(); break;

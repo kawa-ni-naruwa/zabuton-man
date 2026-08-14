@@ -83,6 +83,10 @@ iPhone想定（375×812）で 横480×縦600 の世界になり、キャンバ�
 - `drawZabuton()` … 座布団1枚。山・手持ち・飛び散りで使い回す
 - 状態遷移 … `title → ready → jump → success → grow → ready` / 失敗で `fail` / オタク失敗で `rage → chase → chaseHit`
 - 効果音はWebAudioで合成（右上のボタンでON/OFF）
+  - スマホ対策として、最初のタップで `unlockAudio()`（AudioContext生成＋resume＋無音を1発）を必ず通す。
+    iOSはユーザー操作の中でこれをやらないと以後ずっと無音になる
+  - `navigator.audioSession.type='playback'` でマナーモード（消音スイッチ）でも鳴るようにしている（Safari 16.4+）。
+    それでも鳴らない端末では、ボタン下の説明文がマナーモードの案内に切り替わる
 
 ## 動作確認
 
