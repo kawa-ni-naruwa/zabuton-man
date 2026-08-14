@@ -181,7 +181,7 @@ function runPose(ph){
 const STYLES = {
   // 大学生風の爽やかな男
   student:{ skin:'#f6d3ae', shirt:'#f4f7fb', shirt2:'#d9e2ee', pants:'#33507e',
-            shoe:'#e8e8ea', hair:'#241a15', kind:'student' },
+            shoe:'#e8e8ea', hair:'#241a15', kind:'student', hairLen:4 },
   // メガネのオタク
   otaku:{ skin:'#efd9c4', shirt:'#4a6ea8', shirt2:'#2f4a75', pants:'#4a4a52',
           shoe:'#3b3b42', hair:'#1b1414', kind:'otaku' },
@@ -189,8 +189,8 @@ const STYLES = {
   friend:{ skin:'#f3cba4', shirt:'#5fa87c', shirt2:'#3f7d59', pants:'#5a4a3a',
            shoe:'#2f2f34', hair:'#2b2018', kind:'friend' },
   // 白いブリーフ一丁の男（全身はだか＋ブリーフ）
-  brief:{ skin:'#f4cfa6', shirt:'#f4cfa6', shirt2:'#f4cfa6', pants:'#f4cfa6',
-          shoe:'#eabf93', hair:'#2a1c14', kind:'brief' }
+  brief:{ skin:'#f8dcbb', shirt:'#f8dcbb', shirt2:'#f8dcbb', pants:'#f8dcbb',
+          shoe:'#eecba4', hair:'#3a2418', kind:'brief', hairLen:7, faceR:[11.8,14.2] }
 };
 
 const INK = '#2b1d15';                 // 輪郭線
@@ -234,9 +234,24 @@ function drawFace(p,C,mood,blink){
   ctx.beginPath(); ctx.moveTo(p.sh[0],p.sh[1]); ctx.lineTo(hx,hy+9);
   ctx.strokeStyle=INK; ctx.lineWidth=11.5; ctx.stroke();
   ctx.strokeStyle=C.skin; ctx.lineWidth=8; ctx.stroke();
+  // 後ろ髪（顔より先に描く。長さは style ごと）
+  if(C.hairLen){
+    ctx.fillStyle=C.hair; ctx.strokeStyle=INK; ctx.lineWidth=2;
+    ctx.beginPath();
+    ctx.ellipse(hx-4, hy+C.hairLen*.30, 12.6, 14.2+C.hairLen, 0, 0, 7);
+    ctx.fill(); ctx.stroke();
+    if(C.kind==='brief'){                        // 襟足を少し跳ねさせる
+      ctx.beginPath();
+      ctx.moveTo(hx-16,hy+4);
+      ctx.quadraticCurveTo(hx-22,hy+C.hairLen+8, hx-12,hy+C.hairLen+11);
+      ctx.quadraticCurveTo(hx-12,hy+C.hairLen+2, hx-9,hy+6);
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+    }
+  }
   // 顔
+  const fr = C.faceR || [12.5,13.5];
   ctx.fillStyle=C.skin; ctx.strokeStyle=INK; ctx.lineWidth=2.2;
-  ctx.beginPath(); ctx.ellipse(hx,hy,12.5,13.5,0,0,7); ctx.fill(); ctx.stroke();
+  ctx.beginPath(); ctx.ellipse(hx,hy,fr[0],fr[1],0,0,7); ctx.fill(); ctx.stroke();
   // 髪（頭より一回り大きい形を上部だけ塗る）
   ctx.save();
   ctx.beginPath(); ctx.rect(hx-20,hy-24,40,16); ctx.clip();
@@ -244,13 +259,26 @@ function drawFace(p,C,mood,blink){
   ctx.beginPath(); ctx.ellipse(hx,hy-1,14,14.6,0,0,7); ctx.fill();
   ctx.restore();
   ctx.fillStyle=C.hair;
-  if(C.kind==='student'){                       // 前髪を斜めに流す
+  if(C.kind==='student'){                       // 前髪を斜めに流す＋もみあげ
     ctx.beginPath();
     ctx.moveTo(hx-13,hy-6);
     ctx.quadraticCurveTo(hx-13,hy-16,hx-1,hy-15);
-    ctx.quadraticCurveTo(hx+12,hy-14,hx+13,hy-3);
+    ctx.quadraticCurveTo(hx+12,hy-14,hx+14,hy-1);
     ctx.quadraticCurveTo(hx+4,hy-9,hx-4,hy-6);
     ctx.quadraticCurveTo(hx-9,hy-4,hx-13,hy-6);
+    ctx.closePath(); ctx.fill();
+    ctx.beginPath();                            // もみあげ（短め）
+    ctx.moveTo(hx+13,hy-5); ctx.quadraticCurveTo(hx+13,hy+1,hx+10.5,hy+1.5);
+    ctx.quadraticCurveTo(hx+10,hy-3,hx+9,hy-6); ctx.closePath(); ctx.fill();
+  }else if(C.kind==='brief'){                   // さらさらの長め前髪（イケメン）
+    ctx.beginPath();
+    ctx.moveTo(hx-14,hy-5);
+    ctx.quadraticCurveTo(hx-14,hy-18,hx,hy-17);
+    ctx.quadraticCurveTo(hx+13,hy-16,hx+14,hy-3);
+    ctx.quadraticCurveTo(hx+12,hy-10,hx+6,hy-11);  // 分け目から流れる束
+    ctx.quadraticCurveTo(hx+9,hy-6,hx+4,hy-6);
+    ctx.quadraticCurveTo(hx-1,hy-10,hx-6,hy-9);
+    ctx.quadraticCurveTo(hx-8,hy-4,hx-12,hy-3);
     ctx.closePath(); ctx.fill();
   }else if(C.kind==='otaku'){                   // ぼさぼさ＋アホ毛
     ctx.beginPath(); ctx.moveTo(hx-14,hy-4);
@@ -263,14 +291,6 @@ function drawFace(p,C,mood,blink){
     ctx.lineWidth=3; ctx.strokeStyle=C.hair;
     ctx.beginPath(); ctx.moveTo(hx-2,hy-15);
     ctx.quadraticCurveTo(hx+2,hy-27,hx+10,hy-24); ctx.stroke();
-  }else if(C.kind==='brief'){                   // 角刈り＋ひげ
-    ctx.beginPath();
-    ctx.moveTo(hx-13,hy-5); ctx.lineTo(hx-13,hy-13);
-    ctx.lineTo(hx+13,hy-13); ctx.lineTo(hx+13,hy-4);
-    ctx.quadraticCurveTo(hx,hy-11,hx-13,hy-5);
-    ctx.closePath(); ctx.fill();
-    ctx.beginPath();                             // ちょびひげ（口の上）
-    ctx.ellipse(hx+7,hy+1,5,1.8,0,0,7); ctx.fill();
   }else{                                        // ふわふわ
     ctx.beginPath();
     ctx.arc(hx-6,hy-12,6.5,0,7); ctx.arc(hx+3,hy-14,6,0,7); ctx.arc(hx+11,hy-9,5,0,7);
@@ -325,9 +345,13 @@ function drawFace(p,C,mood,blink){
     ctx.fillRect(ex1-5,ey-4.5,9,9); ctx.fillRect(ex2-3.5,ey-4.5,9,9);
   }
   // 爽やかキラーン
-  if(C.kind==='student' && mood!=='dizzy'){
+  if((C.kind==='student'||C.kind==='brief') && mood!=='dizzy'){
     ctx.strokeStyle='rgba(255,255,255,.9)'; ctx.lineWidth=1.6;
     ctx.beginPath(); ctx.moveTo(ex2+2,ey-4); ctx.lineTo(ex2+7,ey-9); ctx.stroke();
+  }
+  if(C.kind==='brief'){                          // 頬のツヤ
+    ctx.fillStyle='rgba(255,255,255,.55)';
+    ctx.beginPath(); ctx.ellipse(hx+9,hy+5,2.6,1.6,-.3,0,7); ctx.fill();
   }
 }
 function drawBriefs(p){          // 白ブリーフ（腰まわり）
@@ -721,7 +745,7 @@ function update(dt){
     }else{
       const bob = Math.sin(G.t*3)*.5+.5;
       h.pose = poseLerp(POSE.stand, POSE.crouch, bob*.12);
-      h.mood = 'happy';
+      h.mood = G.chara==='brief' ? 'normal' : 'happy';   // 座布団マンは涼しい顔
     }
     break;
   }
@@ -898,6 +922,16 @@ function star(x,y,r,c){
   }
   ctx.closePath(); ctx.fill();
 }
+function twinkle(x,y,r,a){    // 4方向にとがったキラキラ
+  ctx.save(); ctx.globalAlpha=a; ctx.fillStyle='#fff9d8';
+  ctx.beginPath();
+  ctx.moveTo(x,y-r);
+  ctx.quadraticCurveTo(x+r*.16,y-r*.16, x+r,y);
+  ctx.quadraticCurveTo(x+r*.16,y+r*.16, x,y+r);
+  ctx.quadraticCurveTo(x-r*.16,y+r*.16, x-r,y);
+  ctx.quadraticCurveTo(x-r*.16,y-r*.16, x,y-r);
+  ctx.fill(); ctx.restore();
+}
 function fxText(x,y,t,c){
   ctx.font='bold 15px "Hiragino Sans",sans-serif'; ctx.textAlign='center';
   ctx.lineWidth=4; ctx.strokeStyle='rgba(0,0,0,.6)'; ctx.strokeText(t,x,y);
@@ -1003,9 +1037,27 @@ function render(){
   const h = G.hero, C = STYLES[G.chara] || STYLES.student;
   {
     drawShadow(h.x, GROUND+3, 20, .2 - Math.min(.14,(GROUND-h.y)/1400));
+    if(G.chara==='brief'){                       // 後光
+      const cy = h.y-58;
+      const rg = ctx.createRadialGradient(h.x,cy,8, h.x,cy,86);
+      rg.addColorStop(0,'rgba(255,246,205,.34)');
+      rg.addColorStop(.55,'rgba(255,240,180,.14)');
+      rg.addColorStop(1,'rgba(255,240,180,0)');
+      ctx.fillStyle=rg; ctx.beginPath(); ctx.arc(h.x,cy,86,0,7); ctx.fill();
+    }
     const blink = (G.blinkT % 4) < .13;
     drawPerson(h.pose, C, {x:h.x, y:h.y, facing:h.facing, mood:h.mood,
                            rot:h.rot||0, rotY:-58, blink});
+    if(G.chara==='brief'){                       // まわりでキラキラ
+      const T = G.blinkT, cy = h.y-58;
+      for(let i=0;i<6;i++){
+        const a  = i*1.047 + T*.55;
+        const rr = 44 + 13*Math.sin(T*1.7+i*2.1);
+        const ph = Math.sin(T*2.6 + i*1.9);
+        twinkle(h.x+Math.cos(a)*rr*1.15, cy+Math.sin(a)*rr*.95,
+                4 + 4.5*Math.abs(ph), .35 + .55*Math.abs(ph));
+      }
+    }
     // オタクが持っている座布団（追跡中）
     if(G.state==='chase'||G.state==='chaseHit'){
       const sw = G.chase.swing>0 ? 1-G.chase.swing/.34 : 0;
