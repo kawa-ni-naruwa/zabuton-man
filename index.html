@@ -897,11 +897,9 @@ function drawTitle(){
   ctx.fillText('座布団マン', W/2, 200);
   ctx.fillStyle='#f6ecd8'; ctx.font='17px "Hiragino Sans",sans-serif';
   ctx.fillText('揺れる座布団のど真ん中に、飛び乗れ。', W/2, 240);
-  ctx.font='14px "Hiragino Sans",sans-serif'; ctx.fillStyle='#c9b391';
-  ctx.fillText('成功すると座布団が1枚増える／3回に1回はメガネのオタクが登場', W/2, 274);
   ctx.fillStyle = Math.sin(Date.now()/300)>0 ? '#ffd97a' : '#8d7862';
   ctx.font='bold 20px "Hiragino Sans",sans-serif';
-  ctx.fillText('▼ ボタン / スペースで開始', W/2, 330);
+  ctx.fillText('▼ ボタン / スペースで開始', W/2, 302);
 }
 
 function render(){
