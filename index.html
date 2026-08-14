@@ -15,25 +15,34 @@
   html,body{margin:0;padding:0;background:var(--bg);color:var(--cream);
     font-family:"Hiragino Sans","Hiragino Kaku Gothic ProN","Yu Gothic",system-ui,sans-serif;
     overscroll-behavior:none;touch-action:manipulation}
-  .wrap{max-width:820px;margin:0 auto;padding:8px 10px 18px;
-    display:flex;flex-direction:column;min-height:100dvh}
-  header{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:2px 2px 8px}
-  h1{margin:0;font-size:20px;letter-spacing:.22em;color:var(--gold);
-     text-shadow:0 2px 0 #00000066}
-  h1 small{display:block;font-size:10px;letter-spacing:.12em;color:#b09a7a;margin-top:2px}
+  .wrap{max-width:860px;margin:0 auto;padding:6px 10px 10px;gap:8px;
+    display:flex;flex-direction:column;height:100dvh}
+  header{flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;gap:8px}
+  h1{margin:0;font-size:19px;letter-spacing:.22em;color:var(--gold);
+     text-shadow:0 2px 0 #00000066;white-space:nowrap}
+  h1 small{display:block;font-size:9px;letter-spacing:.12em;color:#b09a7a;margin-top:1px}
   .sound{background:#3a2b21;border:1px solid #55402f;color:var(--cream);
-    border-radius:999px;padding:6px 12px;font-size:12px;cursor:pointer}
-  .stage{position:relative;border-radius:14px;overflow:hidden;
-    border:3px solid #4a382a;box-shadow:0 10px 30px #0009,inset 0 0 0 1px #00000055;background:#000}
-  canvas{display:block;width:100%;height:auto}
-  #btn{margin-top:14px;width:100%;padding:20px 10px;font-size:24px;font-weight:800;
+    border-radius:999px;padding:6px 12px;font-size:12px;cursor:pointer;flex:0 0 auto}
+  .stage{flex:1 1 auto;min-height:100px;display:flex;align-items:center;justify-content:center}
+  canvas{display:block;border-radius:14px;background:#000;
+    border:3px solid #4a382a;box-shadow:0 10px 30px #0009}
+  #btn{flex:0 0 auto;width:100%;padding:clamp(18px,4.2vh,40px) 10px;font-size:24px;font-weight:800;
     letter-spacing:.2em;color:#3a2410;cursor:pointer;
     background:linear-gradient(#ffd97a,#e5a93c);
     border:none;border-bottom:6px solid #a8721f;border-radius:16px;
     box-shadow:0 6px 18px #0007;transition:transform .05s,border-width .05s}
   #btn:active{transform:translateY(4px);border-bottom-width:2px}
   #btn.attack{background:linear-gradient(#ff9a8a,#e1442c);color:#fff;border-bottom-color:#8e2413}
-  .hint{margin:8px 0 0;text-align:center;font-size:11px;color:#8d7862;letter-spacing:.06em}
+  .hint{flex:0 0 auto;margin:0;text-align:center;font-size:11px;color:#8d7862;letter-spacing:.06em}
+  /* 画面が低いときはUIを削ってゲーム画面に高さを回す */
+  @media (max-height:760px){
+    h1{font-size:16px} h1 small{display:none}
+    #btn{padding:16px 10px;font-size:21px}
+    .hint{font-size:10px}
+  }
+  @media (max-height:600px){
+    #btn{padding:12px 10px;font-size:19px} .hint{display:none}
+  }
 </style>
 </head>
 <body>
@@ -57,21 +66,35 @@ const cv  = document.getElementById('cv');
 const ctx = cv.getContext('2d');
 const btn = document.getElementById('btn');
 
-const W = 800, H = 520;          // 論理解像度
 const GROUND = 432;              // 畳の立ち位置（足元のY）
-const CENTER = 400;              // 着地点X（ここは動かない。座布団の方が揺れる）
-const STARTX = 668;              // 男が立っている位置（右側）
 const ZW = 98;                   // 座布団の幅
+// 画面の形に合わせて世界の大きさを変える。縦長のスマホでは横を狭く
+// （＝そのぶん大きく表示）し、余った縦は畳の手前を伸ばして埋める。
+let W = 800, H = 520, CENTER = 400, STARTX = 668, AMPMAX = 132;
 
 let scale = 1;
 function resize(){
-  const cssW = cv.parentElement.getBoundingClientRect().width;
-  const dpr  = Math.min(window.devicePixelRatio || 1, 2);
-  cv.width  = Math.round(cssW * dpr);
-  cv.height = Math.round(cssW * H / W * dpr);
-  scale = cssW / W * dpr;
+  const box = cv.parentElement.getBoundingClientRect();
+  const availW = Math.max(200, box.width), availH = Math.max(120, box.height);
+  W = Math.round(Math.max(480, Math.min(800, 520 * availW / availH)));
+  H = Math.round(Math.max(520, Math.min(600, W * availH / availW)));
+  // 男の立ち位置と、座布団が揺れられる範囲を横幅から決める。
+  // 広い画面では従来どおり（STARTX=668 / CENTER=400 / 振れ幅132）。
+  STARTX = W - Math.max(100, Math.round(132*W/800));
+  const lo = 55, hi = STARTX - 26;
+  CENTER = (Math.min(W/2-lo, hi-W/2) >= 181) ? Math.round(W/2) : Math.round((lo+hi)/2);
+  AMPMAX = Math.max(40, Math.min(132, Math.round(Math.min(CENTER-lo, hi-CENTER) - 49)));
+  const fit = Math.min(availW / W, availH / H);
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  cv.style.width  = Math.round(W*fit)+'px';
+  cv.style.height = Math.round(H*fit)+'px';
+  cv.width  = Math.round(W*fit*dpr);
+  cv.height = Math.round(H*fit*dpr);
+  scale = fit * dpr;
+  if(typeof G !== 'undefined' && G.state==='ready'){ G.hero.x = STARTX; G.friend.x = STARTX+64; }
 }
 window.addEventListener('resize', resize);
+window.addEventListener('orientationchange', ()=>setTimeout(resize,150));
 
 /* ---------- 音（WebAudioの簡易シンセ） ---------- */
 let actx = null, soundOn = true;
@@ -491,7 +514,7 @@ function drawRoom(){
   ctx.fillStyle='#5a3f2a'; ctx.fillRect(0,86,W,14);
   ctx.fillStyle='#6d4e34'; ctx.fillRect(0,86,W,4);
   // 提灯
-  for(const lx of [96,704]){
+  for(const lx of [Math.round(W*.12), Math.round(W*.88)]){
     ctx.strokeStyle='#2a1a10'; ctx.lineWidth=2;
     ctx.beginPath(); ctx.moveTo(lx,0); ctx.lineTo(lx,26); ctx.stroke();
     ctx.fillStyle='#e8d7a8';
@@ -503,34 +526,41 @@ function drawRoom(){
   }
   // 壁
   ctx.fillStyle='#c9b391'; ctx.fillRect(0,100,W,236);
-  // 障子
-  for(let i=0;i<5;i++){
-    const x = 118 + i*114;
-    if(i===2) continue;              // 中央は床の間
-    ctx.fillStyle='#f3ead4'; ctx.fillRect(x,112,104,206);
-    ctx.strokeStyle='#8a6a48'; ctx.lineWidth=3; ctx.strokeRect(x,112,104,206);
-    ctx.lineWidth=1.6; ctx.strokeStyle='#a98a63';
-    for(let c=1;c<4;c++){ ctx.beginPath(); ctx.moveTo(x+c*26,112); ctx.lineTo(x+c*26,318); ctx.stroke(); }
-    for(let r=1;r<7;r++){ ctx.beginPath(); ctx.moveTo(x,112+r*29); ctx.lineTo(x+104,112+r*29); ctx.stroke(); }
+  // 障子（床の間の左右を等分して並べる）
+  const alcX = Math.round(CENTER-62);            // 床の間の左端
+  const side = alcX - 14;                        // 片側に使える幅
+  const n = Math.max(1, Math.round(side/110)), gap = 8;
+  const pw = (side - gap*n)/n;
+  for(let s=0;s<2;s++){
+    for(let i=0;i<n;i++){
+      const x = s ? alcX+124+gap+i*(pw+gap) : 14+i*(pw+gap);
+      ctx.fillStyle='#f3ead4'; ctx.fillRect(x,112,pw,206);
+      ctx.strokeStyle='#8a6a48'; ctx.lineWidth=3; ctx.strokeRect(x,112,pw,206);
+      ctx.lineWidth=1.6; ctx.strokeStyle='#a98a63';
+      const cols = Math.max(2, Math.round(pw/26));
+      for(let c=1;c<cols;c++){ const cx=x+pw*c/cols; ctx.beginPath(); ctx.moveTo(cx,112); ctx.lineTo(cx,318); ctx.stroke(); }
+      for(let r=1;r<7;r++){ ctx.beginPath(); ctx.moveTo(x,112+r*29); ctx.lineTo(x+pw,112+r*29); ctx.stroke(); }
+    }
   }
   // 床の間＋掛け軸＋活け花
-  ctx.fillStyle='#a8886a'; ctx.fillRect(340,106,124,222);
-  ctx.fillStyle='#6f5238'; ctx.fillRect(340,106,124,10);
-  ctx.fillStyle='#e9dfc6'; ctx.fillRect(368,124,68,150);
-  ctx.fillStyle='#5b432c'; ctx.fillRect(364,120,76,8); ctx.fillRect(364,270,76,8);
+  ctx.fillStyle='#a8886a'; ctx.fillRect(alcX,106,124,222);
+  ctx.fillStyle='#6f5238'; ctx.fillRect(alcX,106,124,10);
+  ctx.fillStyle='#e9dfc6'; ctx.fillRect(alcX+28,124,68,150);
+  ctx.fillStyle='#5b432c'; ctx.fillRect(alcX+24,120,76,8); ctx.fillRect(alcX+24,270,76,8);
   ctx.fillStyle='#2b211a'; ctx.font='bold 34px "Hiragino Mincho ProN",serif'; ctx.textAlign='center';
-  ctx.fillText('座',402,172); ctx.fillText('布',402,210); ctx.fillText('団',402,248);
+  ctx.fillText('座',alcX+62,172); ctx.fillText('布',alcX+62,210); ctx.fillText('団',alcX+62,248);
   ctx.fillStyle='#8a3030'; ctx.font='9px "Hiragino Mincho ProN",serif';
-  ctx.fillText('魂',430,262);
+  ctx.fillText('魂',alcX+90,262);
   // 花瓶
+  const vx = alcX+112;
   ctx.fillStyle='#3d4f5c';
-  ctx.beginPath(); ctx.ellipse(452,312,11,16,0,0,7); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(vx,312,11,16,0,0,7); ctx.fill();
   ctx.strokeStyle='#4b6b3c'; ctx.lineWidth=2;
-  ctx.beginPath(); ctx.moveTo(452,300); ctx.quadraticCurveTo(444,282,436,276); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(452,300); ctx.quadraticCurveTo(462,284,470,282); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(vx,300); ctx.quadraticCurveTo(vx-8,282,vx-16,276); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(vx,300); ctx.quadraticCurveTo(vx+10,284,vx+18,282); ctx.stroke();
   ctx.fillStyle='#d97a94';
-  ctx.beginPath(); ctx.arc(435,274,5,0,7); ctx.fill();
-  ctx.beginPath(); ctx.arc(471,281,4,0,7); ctx.fill();
+  ctx.beginPath(); ctx.arc(vx-17,274,5,0,7); ctx.fill();
+  ctx.beginPath(); ctx.arc(vx+19,281,4,0,7); ctx.fill();
   // 畳
   const tg = ctx.createLinearGradient(0,330,0,H);
   tg.addColorStop(0,'#93a06a'); tg.addColorStop(.45,'#a8b378'); tg.addColorStop(1,'#8f9c65');
@@ -538,8 +568,7 @@ function drawRoom(){
   ctx.fillStyle='#7c8a58'; ctx.fillRect(0,330,W,5);
   // 畳の目と縁
   ctx.strokeStyle='rgba(60,70,40,.16)'; ctx.lineWidth=1;
-  for(let i=0;i<26;i++){
-    const y = 336 + i*7.4;
+  for(let y=336; y<H; y+=7.4){
     ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke();
   }
   const rows=[[336,372],[372,424],[424,H]];
@@ -553,6 +582,24 @@ function drawRoom(){
     }
   });
   ctx.fillStyle='rgba(0,0,0,.10)'; ctx.fillRect(0,330,W,16);
+  // 縦長画面で手前が空くときは、座卓と急須を置いて広間らしくする
+  if(H > 548){
+    const tx = Math.round(W*.17), ty = H-30;
+    ctx.fillStyle='rgba(0,0,0,.16)';
+    ctx.beginPath(); ctx.ellipse(tx,ty+16,66,11,0,0,7); ctx.fill();
+    ctx.fillStyle='#6b4a2e'; ctx.beginPath(); ctx.roundRect(tx-60,ty-8,120,16,4); ctx.fill();
+    ctx.fillStyle='#8a6440'; ctx.beginPath(); ctx.roundRect(tx-62,ty-14,124,8,4); ctx.fill();
+    ctx.fillStyle='#5b3d24';
+    ctx.fillRect(tx-48,ty+8,7,16); ctx.fillRect(tx+41,ty+8,7,16);
+    ctx.fillStyle='#3f5560';                       // 急須
+    ctx.beginPath(); ctx.ellipse(tx+4,ty-22,13,9,0,0,7); ctx.fill();
+    ctx.beginPath(); ctx.roundRect(tx-4,ty-33,9,5,2); ctx.fill();
+    ctx.strokeStyle='#3f5560'; ctx.lineWidth=3; ctx.lineCap='round';
+    ctx.beginPath(); ctx.moveTo(tx+15,ty-26); ctx.lineTo(tx+23,ty-20); ctx.stroke();
+    ctx.fillStyle='#e6dcc4';                       // 湯呑み
+    ctx.beginPath(); ctx.roundRect(tx-30,ty-20,11,8,2); ctx.fill();
+    ctx.beginPath(); ctx.roundRect(tx-46,ty-19,11,8,2); ctx.fill();
+  }
 }
 
 /* ============================================================
@@ -575,7 +622,7 @@ function setBtn(label, attack){
 function msg(text, sub, dur=1.4, big){ G.msg = {text, sub, big}; G.msgT = dur; G.msgDur = dur; }
 function fx(x,y,type,text){ G.fx.push({x,y,type,text,t:0,life:type==='star'?.9:1.2, vx:(Math.random()-.5)*40, vy:-50-Math.random()*40}); }
 
-function amp(){ return Math.min(52 + G.count*5, 132); }
+function amp(){ return Math.min(52 + G.count*5, AMPMAX); }
 function spd(){ return Math.min(1.5 + G.count*.13, 4.2); }
 function zabutonX(){ return G.sway ? CENTER + amp()*Math.sin(G.phase) : G.zxFrozen; }
 
@@ -661,8 +708,9 @@ function scatter(){
 function startChase(){
   G.state='chase'; G.t=0;
   G.chase.t=0; G.chase.swing=0; G.chase.cool=0;
-  G.chase.spd = 208 + G.chase.retries*18;
-  G.chase.fspd = 236 + G.chase.retries*18;
+  const ws = W/800;                                   // 狭い画面では速度も詰める
+  G.chase.spd  = (208 + G.chase.retries*18) * ws;
+  G.chase.fspd = (236 + G.chase.retries*18) * ws;
   G.hero.x = CENTER; G.hero.mood='angry';
   G.friend.x = Math.min(G.friend.x, W-130); G.friend.dir = 1; G.friend.dash = 0;
   G.friend.alive = true; G.friend.mood='shock';
@@ -675,7 +723,7 @@ function chaseSwing(){
   SE.whack();
   setTimeout(()=>{
     if(G.state!=='chase' || !G.friend.alive) return;
-    if(Math.abs(G.hero.x - G.friend.x) < 52){
+    if(Math.abs(G.hero.x - G.friend.x) < 52*(W/800)){   // 画面幅に比例させる
       G.friend.alive=false; G.friend.mood='dizzy';
       G.friend.vx = (G.friend.x - G.hero.x >= 0 ? 1 : -1) * 300;
       G.friend.vy = -320; G.friend.rot = 0; G.friend.vr = 9;
@@ -808,7 +856,7 @@ function update(dt){
     G.chase.t += dt;
     if(G.chase.cool>0) G.chase.cool -= dt;
     if(G.chase.swing>0) G.chase.swing -= dt;
-    G.chase.spd += 11*dt;                       // だんだん詰められる
+    G.chase.spd += 11*dt*(W/800);               // だんだん詰められる
     const f = G.friend;
     // 逃げる仲間：基本は逃げ、壁際まで追い詰められたら横をすり抜ける
     const away = Math.sign(f.x - h.x) || 1;
@@ -970,15 +1018,16 @@ function drawHUD(){
   if(G.state==='chase'){
     ctx.textAlign='center';
     const p = 1 - G.chase.t/G.chase.limit;
-    ctx.fillStyle='rgba(0,0,0,.45)'; ctx.beginPath(); ctx.roundRect(W/2-140,62,280,16,8); ctx.fill();
+    const tw = Math.min(280, W-80);
+    ctx.fillStyle='rgba(0,0,0,.45)'; ctx.beginPath(); ctx.roundRect(W/2-tw/2,62,tw,16,8); ctx.fill();
     ctx.fillStyle = p<.3? '#e1442c':'#ffd23f';
-    ctx.beginPath(); ctx.roundRect(W/2-138,64,276*Math.max(0,p),12,6); ctx.fill();
+    ctx.beginPath(); ctx.roundRect(W/2-tw/2+2,64,(tw-4)*Math.max(0,p),12,6); ctx.fill();
   }
 }
 function drawMsg(){
   if(G.msgT<=0 || !G.msg) return;
   const big = !!G.msg.big;
-  const bw = big?500:420, bh = big?104:(G.msg.sub?86:58), by = big?156:166;
+  const bw = Math.min(big?500:420, W-24), bh = big?104:(G.msg.sub?86:58), by = big?156:166;
   const age = (G.msgDur||1.4) - G.msgT;
   const pop = big ? 1 + Math.max(0, .42 - age*2.8) : 1;   // どんと出す
   ctx.save();
@@ -1006,9 +1055,11 @@ function drawMsg(){
 function drawTitle(){
   ctx.fillStyle='rgba(15,10,7,.62)'; ctx.fillRect(0,0,W,H);
   ctx.textAlign='center';
-  ctx.fillStyle='#ffd97a'; ctx.font='bold 66px "Hiragino Sans",sans-serif';
+  ctx.fillStyle='#ffd97a';
+  ctx.font='bold '+Math.min(66, Math.round((W-60)/5))+'px "Hiragino Sans",sans-serif';
   ctx.fillText('座布団マン', W/2, 200);
-  ctx.fillStyle='#f6ecd8'; ctx.font='17px "Hiragino Sans",sans-serif';
+  ctx.fillStyle='#f6ecd8';
+  ctx.font=Math.min(17, Math.round((W-40)/18))+'px "Hiragino Sans",sans-serif';
   ctx.fillText('揺れる座布団のど真ん中に、飛び乗れ。', W/2, 240);
   ctx.fillStyle = Math.sin(Date.now()/300)>0 ? '#ffd97a' : '#8d7862';
   ctx.font='bold 20px "Hiragino Sans",sans-serif';
