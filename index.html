@@ -559,7 +559,7 @@ function judge(){
   }else if(G.otaku){                   // オタク失敗 → 激昂して追いかけ回す
     G.state='rage'; G.t=0; SE.angry();
     G.hero.mood='angry';
-    msg('外した！！','…オタク、激昂', 1.5);
+    msg('外した！！', null, 1.5);
     G.shake = 10;
   }else{                               // 通常失敗 → 座布団が飛び散る
     scatter();
@@ -867,16 +867,9 @@ function drawHUD(){
   ctx.beginPath(); ctx.roundRect(W-176,10,164,42,10); ctx.fill();
   ctx.fillStyle='#e8c56a'; ctx.font='bold 18px "Hiragino Sans",sans-serif';
   ctx.fillText('自己ベスト '+G.best+' 枚', W-24, 37);
-  // 誰の番か
-  if(G.state==='ready'||G.state==='jump'){
-    ctx.textAlign='center';
-    ctx.fillStyle = G.otaku ? 'rgba(160,50,60,.85)' : 'rgba(30,70,120,.75)';
-    ctx.beginPath(); ctx.roundRect(W/2-96,60,192,28,14); ctx.fill();
-    ctx.fillStyle='#fff'; ctx.font='bold 15px "Hiragino Sans",sans-serif';
-    ctx.fillText(G.otaku ? 'メガネのオタク（3回に1回）' : '爽やか大学生', W/2, 80);
-  }
   // 追跡タイマー
   if(G.state==='chase'){
+    ctx.textAlign='center';
     const p = 1 - G.chase.t/G.chase.limit;
     ctx.fillStyle='rgba(0,0,0,.45)'; ctx.beginPath(); ctx.roundRect(W/2-140,62,280,16,8); ctx.fill();
     ctx.fillStyle = p<.3? '#e1442c':'#ffd23f';
