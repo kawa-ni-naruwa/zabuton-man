@@ -693,7 +693,7 @@ function press(){
     case 'title': G.count=1; G.turn=1; G.chase.retries=0; startTurn(); break;
     case 'ready': doJump(); break;
     case 'chase': chaseSwing(); break;
-    case 'fail':  if(G.t>1.0){ G.count=1; G.chase.retries=0; G.turn++; startTurn(); } break;
+    case 'fail':  if(G.t>1.0){ G.msgT=0; G.count=1; G.chase.retries=0; G.turn++; startTurn(); } break;
   }
 }
 btn.addEventListener('click', press);
@@ -852,6 +852,7 @@ function update(dt){
     h.pose = poseLerp(POSE.airDown, POSE.lying, Math.min(1, G.t/.3));
     h.mood = 'dizzy';
     h.x = CENTER + Math.min(1,G.t/.3)*34;
+    G.msgT = Math.max(G.msgT, .6);   // 記録は「もう一度」を押すまで出しっぱなし
     break;
   }}
 }
