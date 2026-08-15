@@ -161,11 +161,31 @@ function noteAudioBlocked(){
     if(h) h.textContent = '音が出ないときは、端末のマナーモード（消音スイッチ）を解除してください';
   }, 900);
 }
+/* ---------- 隠しコマンド：音のON/OFFを10往復（＝20回切り替え）で100枚スタート ---------- */
+const CHEAT_TOGGLES = 20;
+let soundToggles = 0, cheatUsed = false;
+
 document.getElementById('sound').onclick = (e)=>{
   soundOn = !soundOn;
-  e.currentTarget.textContent = soundOn ? '♪ 音 ON' : '♪ 音 OFF';
+  const label = soundOn ? '♪ 音 ON' : '♪ 音 OFF';
   if(soundOn){ unlockAudio(); snd(880,.08,'square',.10); }   // 押した瞬間に解錠＆確認音
+  soundToggles++;
+  // 終盤だけ「あと何回か」を点で示す（気づかせるためのヒント）
+  const left = CHEAT_TOGGLES - soundToggles;
+  e.currentTarget.textContent =
+    (!cheatUsed && left > 0 && left <= 6) ? label + ' ' + '・'.repeat(left) : label;
+  if(soundToggles >= CHEAT_TOGGLES && !cheatUsed) startCheat();
 };
+function startCheat(){
+  cheatUsed = true;
+  G.cheated = true;                      // 以後この セッションは100枚スタート
+  G.count = 100; G.chase.retries = 0; G.keepChara = false;
+  G.parts.length = 0; G.fx.length = 0;
+  G.sway = false; G.zxFrozen = CENTER;
+  startTurn();
+  msg('座布団100枚', null, 2.4, true);
+  SE.fanfare(); G.shake = 16;
+}
 
 /* ============================================================
    ポーズ定義（右向きローカル座標／足元が原点、上が負）
@@ -506,7 +526,7 @@ const ZCOL = [
   ['#a8354a','#7d2437'], ['#6b4c8f','#4c3468'], ['#2f5b86','#22415f'],
   ['#a86a2c','#7d4c1c'], ['#4b7a4a','#355936'], ['#8f3f6f','#6a2c52']
 ];
-function drawZabuton(cx, cy, w, h, ci, rot=0, top=false){
+function drawZabuton(cx, cy, w, h, ci, rot=0, top=false, dense=false){
   const [c1,c2] = ZCOL[ci % ZCOL.length];
   ctx.save(); ctx.translate(cx,cy); ctx.rotate(rot);
   const hw=w/2, hh=h/2;
@@ -524,9 +544,13 @@ function drawZabuton(cx, cy, w, h, ci, rot=0, top=false){
   const g = ctx.createLinearGradient(0,-hh,0,hh);
   g.addColorStop(0,c1); g.addColorStop(1,c2);
   ctx.fillStyle=g; ctx.fill();
-  ctx.strokeStyle='rgba(30,14,10,.75)'; ctx.lineWidth=2; ctx.stroke();
-  ctx.strokeStyle='rgba(0,0,0,.22)'; ctx.lineWidth=1;
-  ctx.beginPath(); ctx.moveTo(-hw+2,hh*.3); ctx.lineTo(hw-2,hh*.3); ctx.stroke();
+  if(dense){                       // 積み上がって潰れているときは輪郭を省いて縞に見せる
+    ctx.strokeStyle='rgba(30,14,10,.35)'; ctx.lineWidth=1; ctx.stroke();
+  }else{
+    ctx.strokeStyle='rgba(30,14,10,.75)'; ctx.lineWidth=2; ctx.stroke();
+    ctx.strokeStyle='rgba(0,0,0,.22)'; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(-hw+2,hh*.3); ctx.lineTo(hw-2,hh*.3); ctx.stroke();
+  }
   if(top){ // 上面と中央の房
     ctx.fillStyle='rgba(255,255,255,.16)';
     ctx.beginPath(); ctx.ellipse(0,-hh+3,hw-5,5,0,0,7); ctx.fill();
@@ -649,7 +673,7 @@ function drawRoom(){
 const G = {
   state:'title', t:0,
   count:1, turn:1, best:+(localStorage.getItem('zabutonman-best')||0),
-  chara:'student', otaku:false, keepChara:false, phase:0, sway:true,
+  chara:'student', otaku:false, keepChara:false, cheated:false, phase:0, sway:true,
   hero:{x:STARTX, y:GROUND, pose:POSE.stand, facing:-1, mood:'normal', rot:0},
   friend:{x:STARTX+64, y:GROUND, facing:-1, dir:-1, mood:'normal', alive:true},
   jump:{dur:.85, apex:200, fromY:GROUND, toY:GROUND, hit:false, err:0},
@@ -663,6 +687,7 @@ function setBtn(label, attack){
 function msg(text, sub, dur=1.4, big){ G.msg = {text, sub, big}; G.msgT = dur; G.msgDur = dur; }
 function fx(x,y,type,text){ G.fx.push({x,y,type,text,t:0,life:type==='star'?.9:1.2, vx:(Math.random()-.5)*40, vy:-50-Math.random()*40}); }
 
+function startCount(){ return G.cheated ? 100 : 1; }
 function amp(){ return Math.min(52 + G.count*5, AMPMAX); }
 function spd(){ return Math.min(1.5 + G.count*.13, 4.2); }
 function zabutonX(){ return G.sway ? CENTER + amp()*Math.sin(G.phase) : G.zxFrozen; }
@@ -741,9 +766,12 @@ function scatter(){
     });
   }
   G.hero.mood='dizzy'; G.shake = 16;
-  const isNew = G.count > G.best;
+  // 100枚スタート中の記録は自己ベストに入れない
+  const isNew = !G.cheated && G.count > G.best;
   if(isNew){ G.best = G.count; localStorage.setItem('zabutonman-best', G.best); }
-  msg('記録 '+G.count+'枚', isNew ? '★自己ベスト更新！' : '自己ベスト '+G.best+'枚', 2.6);
+  msg('記録 '+G.count+'枚',
+      G.cheated ? '100枚スタート中（自己ベストには入りません）'
+                : (isNew ? '★自己ベスト更新！' : '自己ベスト '+G.best+'枚'), 2.6);
   setBtn('もう一度');
 }
 function startChase(){
@@ -779,10 +807,10 @@ function chaseSwing(){
 function press(){
   unlockAudio();
   switch(G.state){
-    case 'title': G.count=1; G.turn=1; G.chase.retries=0; startTurn(); break;
+    case 'title': G.count=startCount(); G.turn=1; G.chase.retries=0; startTurn(); break;
     case 'ready': doJump(); break;
     case 'chase': chaseSwing(); break;
-    case 'fail':  if(G.t>1.0){ G.msgT=0; G.count=1; G.chase.retries=0; G.turn++; startTurn(); } break;
+    case 'fail':  if(G.t>1.0){ G.msgT=0; G.count=startCount(); G.chase.retries=0; G.turn++; startTurn(); } break;
   }
 }
 btn.addEventListener('click', press);
@@ -962,9 +990,11 @@ function drawStack(){
   const n  = G.state==='grow' ? G.count-1 : G.count;
   const lh = stackLayerH(G.state==='grow' ? G.count : n);
   const zx = zabutonX();
+  const dense = lh < 6;                      // 枚数が多くて潰れている状態
   drawShadow(zx, GROUND+4, ZW*.52, .26);
   for(let i=0;i<n;i++){
-    drawZabuton(zx, zabutonCY(i,lh), ZW, ZH, i, 0, i===n-1 && G.state!=='grow');
+    const top = (i===n-1 && G.state!=='grow');
+    drawZabuton(zx, zabutonCY(i,lh), ZW, ZH, i, 0, top, dense && !top);
   }
   if(G.state==='grow'){
     drawZabuton(zx, zabutonCY(G.count-1,lh) + (G.dropY||0), ZW, ZH, G.count-1, 0, true);
