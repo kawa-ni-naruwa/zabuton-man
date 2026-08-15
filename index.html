@@ -687,7 +687,6 @@ function setBtn(label, attack){
 function msg(text, sub, dur=1.4, big){ G.msg = {text, sub, big}; G.msgT = dur; G.msgDur = dur; }
 function fx(x,y,type,text){ G.fx.push({x,y,type,text,t:0,life:type==='star'?.9:1.2, vx:(Math.random()-.5)*40, vy:-50-Math.random()*40}); }
 
-function startCount(){ return G.cheated ? 100 : 1; }
 function amp(){ return Math.min(52 + G.count*5, AMPMAX); }
 function spd(){ return Math.min(1.5 + G.count*.13, 4.2); }
 function zabutonX(){ return G.sway ? CENTER + amp()*Math.sin(G.phase) : G.zxFrozen; }
@@ -770,7 +769,7 @@ function scatter(){
   const isNew = !G.cheated && G.count > G.best;
   if(isNew){ G.best = G.count; localStorage.setItem('zabutonman-best', G.best); }
   msg('記録 '+G.count+'枚',
-      G.cheated ? '100枚スタート中（自己ベストには入りません）'
+      G.cheated ? '100枚スタートはここまで。次は1枚から'
                 : (isNew ? '★自己ベスト更新！' : '自己ベスト '+G.best+'枚'), 2.6);
   setBtn('もう一度');
 }
@@ -807,10 +806,15 @@ function chaseSwing(){
 function press(){
   unlockAudio();
   switch(G.state){
-    case 'title': G.count=startCount(); G.turn=1; G.chase.retries=0; startTurn(); break;
+    case 'title': G.count=1; G.turn=1; G.chase.retries=0; startTurn(); break;
     case 'ready': doJump(); break;
     case 'chase': chaseSwing(); break;
-    case 'fail':  if(G.t>1.0){ G.msgT=0; G.count=startCount(); G.chase.retries=0; G.turn++; startTurn(); } break;
+    case 'fail':  if(G.t>1.0){
+      G.msgT=0;
+      // 100枚スタートは1回きり。失敗したら1枚に戻す（また20回押せば再発動できる）
+      if(G.cheated){ G.cheated=false; cheatUsed=false; soundToggles=0; }
+      G.count=1; G.chase.retries=0; G.turn++; startTurn();
+    } break;
   }
 }
 btn.addEventListener('click', press);
